@@ -23,7 +23,17 @@
 > **"Your secrets should die with you, not with a server breach."** — Surakshit Labs
 > **"आपके राज़ सर्वर उल्लंघन के साथ नहीं, आपके साथ खत्म होने चाहिए।"** — सुरक्षित लैब्स
 
-[🚀 Live Demo](https://sudhirdevops1.github.io/-Surakshit-Vault-PRO/) · [📥 Download](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/archive/refs/heads/main.zip) · [🐛 Report Bug](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/issues) · [✨ Request Feature](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/issues)
+<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0">
+
+[![Live — Cloudflare Pages](https://img.shields.io/badge/LIVE-surakshit--vault--pro.pages.dev-22d3ee?style=for-the-badge&logo=cloudflare&logoColor=white)](https://surakshit-vault-pro.pages.dev/)
+[![GitHub Pages](https://img.shields.io/badge/Mirror-GitHub_Pages-181717?style=for-the-badge&logo=github)](https://sudhirdevops1.github.io/Surakshit-Vault-PRO/)
+
+</div>
+
+### 🌐 Live: **[https://surakshit-vault-pro.pages.dev/](https://surakshit-vault-pro.pages.dev/)** ← Primary (Cloudflare Pages — Fastest)
+### 🪞 Mirror: [https://sudhirdevops1.github.io/Surakshit-Vault-PRO/](https://sudhirdevops1.github.io/Surakshit-Vault-PRO/) (GitHub Pages)
+
+[📥 Download ZIP](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/archive/refs/heads/main.zip) · [🐛 Report Bug](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/issues) · [✨ Request Feature](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/issues) · [📄 Security Policy](SECURITY.md)
 
 </div>
 
@@ -214,14 +224,21 @@
 
 ## 🚀 Quick Start
 
-### Option 1: Use Online (GitHub Pages)
-Visit the [live demo](https://sudhirdevops1.github.io/-Surakshit-Vault-PRO/) — no install required.
+### Option 1: Use Live (Cloudflare Pages — Recommended)
+Visit the **live app**: **[https://surakshit-vault-pro.pages.dev/](https://surakshit-vault-pro.pages.dev/)** — no install required, fastest CDN, edge-cached.
+
+> **LIVE LIVE LIVE:** 🔥 `https://surakshit-vault-pro.pages.dev/` 🔥 — 100% offline capable after first load, installable as PWA!
+
+### Option 2: Mirror (GitHub Pages)
+Visit the mirror: [https://sudhirdevops1.github.io/Surakshit-Vault-PRO/](https://sudhirdevops1.github.io/Surakshit-Vault-PRO/) — same build, GitHub-hosted.
+
+### Option 3: Build Locally
 
 ### Option 2: Build Locally
 ```bash
 # Clone the repository
-git clone https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO.git
-cd -Surakshit-Vault-PRO
+git clone https://github.com/SudhirDevOps1/Surakshit-Vault-PRO.git
+cd Surakshit-Vault-PRO
 
 # Install dependencies
 npm install
@@ -236,7 +253,7 @@ npm run build
 ```
 
 ### Option 3: Download Single HTML
-1. Go to [Releases](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/releases)
+1. Go to [Releases](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/releases)
 2. Download `surakshit-vault-pro-v4.1.0.html`
 3. Open in any modern browser
 4. Works completely offline — keep on USB drive for emergency
@@ -334,17 +351,21 @@ dist/index.html  1.28 MB │ gzip: 392 KB
 
 ## 🚢 Deployment
 
-### GitHub Pages (free, recommended)
+### Cloudflare Pages (Primary — https://surakshit-vault-pro.pages.dev/)
+**Live now at [https://surakshit-vault-pro.pages.dev/](https://surakshit-vault-pro.pages.dev/)** — edge-cached worldwide, <50ms TTFB.
+
+```bash
+# Connect GitHub repo in Cloudflare Pages dashboard
+# Build command: npm run build
+# Publish directory: dist
+# → Auto-deploys on push to main → https://surakshit-vault-pro.pages.dev/
+```
+
+### GitHub Pages (Mirror)
 ```bash
 # Already configured — just push to main branch
 git push origin main
-# → Auto-deploys to https://sudhirdevops1.github.io/-Surakshit-Vault-PRO/
-```
-
-### Cloudflare Pages
-```bash
-npm run build
-# Upload dist/index.html to Cloudflare Pages
+# → Auto-deploys to https://sudhirdevops1.github.io/Surakshit-Vault-PRO/
 ```
 
 ### Netlify / Vercel
@@ -547,20 +568,23 @@ This project is **source-available** for personal, educational, and non-commerci
 
 ## 🚀 त्वरित प्रारंभ
 
-### विकल्प 1: ऑनलाइन उपयोग (GitHub Pages)
-[लाइव डेमो](https://sudhirdevops1.github.io/-Surakshit-Vault-PRO/) पर जाएं — कोई इंस्टॉलेशन नहीं।
+### विकल्प 1: लाइव (Cloudflare — मुख्य लिंक)
+**लाइव ऐप:** **[https://surakshit-vault-pro.pages.dev/](https://surakshit-vault-pro.pages.dev/)** पर जाएं — कोई इंस्टॉलेशन नहीं, सबसे तेज़ CDN!
 
-### विकल्प 2: स्थानीय रूप से बनाएं
+### विकल्प 2: मिरर (GitHub Pages)
+मिरर: [https://sudhirdevops1.github.io/Surakshit-Vault-PRO/](https://sudhirdevops1.github.io/Surakshit-Vault-PRO/) पर जाएं।
+
+### विकल्प 3: स्थानीय रूप से बनाएं
 ```bash
-git clone https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO.git
-cd -Surakshit-Vault-PRO
+git clone https://github.com/SudhirDevOps1/Surakshit-Vault-PRO.git
+cd Surakshit-Vault-PRO
 npm install
 npm run dev          # विकास सर्वर
 npm run build        # प्रोडक्शन बिल्ड
 ```
 
 ### विकल्प 3: सिंगल HTML डाउनलोड
-1. [Releases](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/releases) पर जाएं
+1. [Releases](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/releases) पर जाएं
 2. `surakshit-vault-pro-v4.1.0.html` डाउनलोड करें
 3. किसी भी आधुनिक ब्राउज़र में खोलें
 4. **100% ऑफलाइन काम करता है** — USB ड्राइव पर रखें
@@ -625,9 +649,9 @@ If this project helped you, **please star ⭐ the repository** and share with fe
 
 <div align="center">
 
-[![Star History Chart](https://img.shields.io/github/stars/SudhirDevOps1/-Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/stargazers)
-[![Forks](https://img.shields.io/github/forks/SudhirDevOps1/-Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/network/members)
-[![Watchers](https://img.shields.io/github/watchers/SudhirDevOps1/-Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/-Surakshit-Vault-PRO/watchers)
+[![Star History Chart](https://img.shields.io/github/stars/SudhirDevOps1/Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/stargazers)
+[![Forks](https://img.shields.io/github/forks/SudhirDevOps1/Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/network/members)
+[![Watchers](https://img.shields.io/github/watchers/SudhirDevOps1/Surakshit-Vault-PRO?style=social)](https://github.com/SudhirDevOps1/Surakshit-Vault-PRO/watchers)
 
 </div>
 

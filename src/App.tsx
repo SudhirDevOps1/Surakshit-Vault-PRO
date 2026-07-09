@@ -1056,7 +1056,11 @@ export default function App(){
             <span className="font-mono text-[11px]">No cookies • No analytics • No telemetry • No cloud upload • Keys never leave device • Open-source auditable Web Crypto •</span><br />
             <span className="mt-2 inline-block rounded-full bg-white/5 px-3 py-1 text-[10px] font-bold tracking-widest">All Rights Reserved — Licensed for production use • Keep HTML + QR + Password safe for 10+ years</span>
           </div>
-          <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px]">
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[11px]">
+            <a href="https://surakshit-vault-pro.pages.dev/" target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/15 px-3 py-1 font-bold text-cyan-200 hover:bg-cyan-500/25"><Link2 size={12} /> Live: surakshit-vault-pro.pages.dev</a>
+            <a href="https://github.com/SudhirDevOps1/Surakshit-Vault-PRO" target="_blank" rel="noopener" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10">GitHub Repo</a>
+          </div>
+          <div className="mt-3 flex flex-wrap justify-center gap-2 text-[11px]">
             <a className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10" href="#" onClick={e=>{e.preventDefault(); setHelpOpen(true)}}>Security Whitepaper</a>
             <a className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10" href="#" onClick={e=>{e.preventDefault(); toast("No data collection — fully offline","info")}}>Privacy Policy: Zero Data</a>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 font-bold text-emerald-300"><ShieldCheck size={12} /> Production Grade • Audited • PWA Ready</span>

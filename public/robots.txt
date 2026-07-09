@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sudhirdevops1.github.io/-Surakshit-Vault-PRO/sitemap.xml
+Sitemap: https://surakshit-vault-pro.pages.dev/sitemap.xml
+Sitemap: https://sudhirdevops1.github.io/Surakshit-Vault-PRO/sitemap.xml
