@@ -1,0 +1,19 @@
+{
+  "name": "Surakshit Vault PRO — Security Suite",
+  "short_name": "SurakshitPRO",
+  "description": "Production-grade offline AES-GCM vault + security tools",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#05070f",
+  "theme_color": "#05070f",
+  "icons": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "version": "4.1.0",
+  "author": "Surakshit Labs Pvt. Ltd."
+}

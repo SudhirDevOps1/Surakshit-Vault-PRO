@@ -1,21 +1,37 @@
-MIT License
+Source-Available License
+Copyright © 2026 Surakshit Labs Pvt. Ltd. — All Rights Reserved
+कॉपीराइट © 2026 सुरक्षित लैब्स प्रा. लि. — सर्वाधिकार सुरक्षित
 
-Copyright (c) 2026 Sudhir Singh
+PERMISSIONS
+- ✅ Personal use
+- ✅ Educational use
+- ✅ Non-commercial use
+- ✅ Modification for personal/educational purposes
+- ✅ Distribution of unmodified source
+- ✅ Security research and auditing
+- ✅ Fork and contribute (PRs welcome)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+RESTRICTIONS
+- ❌ Commercial use without explicit written permission
+- ❌ Selling the software or derivative works
+- ❌ White-label deployments without licensing agreement
+- ❌ Removal of copyright notices
+- ❌ Use in proprietary products
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+REQUIREMENTS
+- 📋 All copies must include this LICENSE file
+- 📋 Copyright notice must be preserved
+- 📋 Source code modifications must be documented
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+For commercial licensing, white-label deployments, enterprise support,
+or custom integrations, contact:
+- 📧 support@surakshitlabs.dev
+- 💼 enterprise@surakshitlabs.dev
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
