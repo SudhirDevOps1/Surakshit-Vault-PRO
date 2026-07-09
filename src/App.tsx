@@ -21,6 +21,31 @@ const SETTINGS_KEY = "sn_settings_pro_v4"
 const APP_VERSION = "4.1.0"
 
 type Tab = "notes" | "jwt" | "password" | "hash" | "base64" | "apikey" | "vault" | "suite" | "contact"
+const VALID_TABS: Tab[] = ["notes", "jwt", "password", "hash", "base64", "apikey", "vault", "suite", "contact"]
+const TAB_ALIASES: Record<string, Tab> = {
+  notes: "notes", note: "notes", encrypt: "notes", decrypt: "notes",
+  jwt: "jwt", secret: "jwt",
+  password: "password", pw: "password", pass: "password",
+  hash: "hash", sha: "hash",
+  base64: "base64", b64: "base64",
+  apikey: "apikey", api: "apikey", key: "apikey",
+  vault: "vault",
+  suite: "suite", hub: "suite", tools: "suite",
+  contact: "contact", help: "contact", support: "contact",
+}
+function parseHashTab(hash?: string): Tab {
+  const raw = (hash ?? (typeof window !== "undefined" ? window.location.hash : "")).replace(/^#/, "").split("?")[0].toLowerCase().trim()
+  if (!raw) return "notes"
+  if (VALID_TABS.includes(raw as Tab)) return raw as Tab
+  return TAB_ALIASES[raw] || "notes"
+}
+function setHashTab(t: Tab, replace = false) {
+  if (typeof window === "undefined") return
+  const next = `#${t}`
+  if (window.location.hash === next) return
+  if (replace) window.history.replaceState(null, "", next)
+  else window.history.pushState(null, "", next)
+}
 
 const INLINE_ICON_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234f46e5'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%230a1020'/%3E%3Cstop offset='1' stop-color='%2305070f'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' rx='28' fill='url(%23bg)' stroke='url(%23g)' stroke-width='4'/%3E%3Cpath d='M64 22 L96 36 V66 Q96 96 64 108 Q32 96 32 66 V36 Z' fill='url(%23g)' opacity='0.25' stroke='url(%23g)' stroke-width='3' stroke-linejoin='round'/%3E%3Crect x='50' y='58' width='28' height='30' rx='5' fill='%23eef2ff'/%3E%3Cpath d='M56 58 V50 A8 8 0 0 1 72 50 V58' fill='none' stroke='%23eef2ff' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='64' cy='72' r='3.5' fill='%234f46e5'/%3E%3Crect x='62.5' y='72' width='3' height='8' fill='%234f46e5'/%3E%3C/svg%3E"
 type Toast = { id: number; msg: string; type: "ok" | "err" | "info" }
@@ -121,19 +146,53 @@ function strengthScore(pw: string) {
   return { pct:(s/6)*100, label: labels[Math.min(s,6)], color: colors[Math.min(s,6)] }
 }
 
+/* ============== CONFETTI PARTICLES ============== */
+function burstParticles(x?: number, y?: number) {
+  const cx = x ?? window.innerWidth / 2, cy = y ?? window.innerHeight / 2
+  const colors = ["#6366f1","#22d3ee","#a855f7","#34d399","#fbbf24","#f87171","#3b82f6","#ec4899"]
+  const count = 35
+  const container = document.createElement("div")
+  container.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden"
+  document.body.appendChild(container)
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("div")
+    const size = 4 + Math.random() * 8
+    const color = colors[Math.floor(Math.random() * colors.length)]
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.6
+    const vel = 120 + Math.random() * 200
+    const dx = Math.cos(angle) * vel, dy = Math.sin(angle) * vel - 80
+    const rot = Math.random() * 720 - 360
+    const dur = 0.6 + Math.random() * 0.5
+    const isCircle = Math.random() > 0.5
+    p.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:${size}px;height:${isCircle ? size : size*0.45}px;background:${color};border-radius:${isCircle?"50%":"2px"};opacity:1;transform:translate(-50%,-50%);pointer-events:none`
+    p.animate([
+      { transform: "translate(-50%,-50%) rotate(0deg) scale(1)", opacity: 1 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${rot}deg) scale(0.2)`, opacity: 0 }
+    ], { duration: dur * 1000, easing: "cubic-bezier(0.25,0.46,0.45,0.94)", fill: "forwards" })
+    container.appendChild(p)
+  }
+  setTimeout(() => container.remove(), 1400)
+}
+
 /* ============== SMALL COMPONENTS ============== */
 function CopyBtn({ text, className="", label="Copy", small }: { text: string; className?: string; label?: string; small?: boolean }) {
   const [copied,setCopied] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
   return (
     <button
-      onClick={async()=>{
+      ref={btnRef}
+      onClick={async(e)=>{
         if(!text) return
         try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(()=>setCopied(false),1600) } catch {
           const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); setCopied(true); setTimeout(()=>setCopied(false),1600)
         }
+        // Particle burst from button position
+        const rect = btnRef.current?.getBoundingClientRect()
+        if(rect) burstParticles(rect.left + rect.width/2, rect.top + rect.height/2)
+        else burstParticles(e.clientX, e.clientY)
       }}
-      className={`inline-flex items-center justify-center gap-1.5 font-bold transition active:scale-[0.98] ${small ? "text-[11px] px-2.5 py-1 rounded-full" : "text-[13px] px-3 py-2 rounded-xl"} ${copied ? "bg-emerald-500 text-white" : "bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10"} ${className}`}
-    >{copied ? <><Check size={small?12:15} /> Copied!</> : <><Copy size={small?12:15} /> {label}</>}</button>
+      className={`inline-flex items-center justify-center gap-1.5 font-bold transition-all duration-200 active:scale-[0.93] ${small ? "text-[11px] px-2.5 py-1 rounded-full" : "text-[13px] px-3 py-2 rounded-xl"} ${copied ? "bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.4)] scale-105" : "bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10 dark:text-slate-200 hover:shadow-md"} ${className}`}
+    >{copied ? <><Check size={small?12:15} className="animate-[bounceIn_0.3s]" /> Copied!</> : <><Copy size={small?12:15} /> {label}</>}</button>
   )
 }
 
@@ -143,8 +202,35 @@ export default function App(){
   const [theme,setTheme] = useState<"dark"|"light">(()=> (localStorage.getItem("theme") as any) || "dark")
   useEffect(()=>{ document.documentElement.setAttribute("data-theme", theme); localStorage.setItem("theme", theme) },[theme])
 
-  // TAB
-  const [tab,setTab] = useState<Tab>("notes")
+  // TAB + HASH ROUTING (#notes, #jwt, #password, #hash, #base64, #apikey, #vault, #suite, #contact)
+  const [tab,setTab] = useState<Tab>(() => parseHashTab())
+  const goToTab = (t: Tab, opts?: { replace?: boolean }) => {
+    setTab(t)
+    setHashTab(t, !!opts?.replace)
+    // scroll to top of content on tab change
+    try { window.scrollTo({ top: 0, behavior: "smooth" }) } catch {}
+  }
+  // Sync tab from URL on load + browser back/forward
+  useEffect(() => {
+    // Ensure URL always has a hash (default #notes)
+    if (!window.location.hash) setHashTab("notes", true)
+    const onHash = () => {
+      const next = parseHashTab(window.location.hash)
+      setTab(next)
+    }
+    const onPop = () => onHash()
+    window.addEventListener("hashchange", onHash)
+    window.addEventListener("popstate", onPop)
+    return () => {
+      window.removeEventListener("hashchange", onHash)
+      window.removeEventListener("popstate", onPop)
+    }
+  }, [])
+  // Keep hash in sync if tab changes from any source
+  useEffect(() => {
+    if (parseHashTab() !== tab) setHashTab(tab)
+  }, [tab])
+
   const [toasts,setToasts] = useState<Toast[]>([])
   const toast = (msg:string,type:Toast["type"]="ok")=>{ const id=Date.now()+Math.random(); setToasts(t=>[...t,{id,msg,type}]); setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),2800) }
 
@@ -285,7 +371,7 @@ export default function App(){
     const handler = (e: KeyboardEvent)=>{
       if(e.key==="Escape"){ setHelpOpen(false); setKeypadOpen(false); setSettingsOpen(false); stopCam() }
       if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ if(tab==="notes"&&document.activeElement?.id!=="decPassword"){ handleEncrypt() } }
-      if(!e.ctrlKey&&!e.metaKey&&document.activeElement===document.body){ const m:any={1:"notes",2:"jwt",3:"password",4:"hash",5:"base64",6:"apikey",7:"vault",8:"suite"}; if(m[e.key]) setTab(m[e.key]) }
+      if(!e.ctrlKey&&!e.metaKey&&document.activeElement===document.body){ const m:any={1:"notes",2:"jwt",3:"password",4:"hash",5:"base64",6:"apikey",7:"vault",8:"suite",9:"contact"}; if(m[e.key]) goToTab(m[e.key]) }
     }
     window.addEventListener("keydown", handler); return ()=>window.removeEventListener("keydown",handler)
   },[tab, plain, encPw])
@@ -561,9 +647,9 @@ export default function App(){
     <div className={`min-h-screen w-full font-[Outfit] antialiased selection:bg-indigo-500/30 ${theme==="dark" ? "bg-[#05070f] text-[#eef2ff]" : "bg-[#f1f5f9] text-slate-900"}`}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');`}</style>
 
-      {/* BG */}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_12%_-8%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(700px_420px_at_92%_8%,rgba(34,211,238,0.14),transparent_50%),radial-gradient(800px_500px_at_50%_100%,rgba(168,85,247,0.14),transparent_55%),linear-gradient(180deg,var(--tw-bg,_#05070f)_0%,#0a1020_50%,#05070f_100%)]" />
+      {/* BG — adapts to theme */}
+      <div className={`pointer-events-none fixed inset-0 -z-10 transition-opacity duration-700 ${theme==="light"?"opacity-30":"opacity-100"}`}>
+        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_12%_-8%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(700px_420px_at_92%_8%,rgba(34,211,238,0.14),transparent_50%),radial-gradient(800px_500px_at_50%_100%,rgba(168,85,247,0.14),transparent_55%),linear-gradient(180deg,#05070f_0%,#0a1020_50%,#05070f_100%)]" />
         <div className="absolute top-[8%] -left-16 h-[280px] w-[280px] rounded-full bg-indigo-600/30 blur-[60px] animate-pulse" />
         <div className="absolute top-[55%] -right-10 h-[220px] w-[220px] rounded-full bg-cyan-400/20 blur-[60px] animate-pulse [animation-delay:-2s]" />
         <div className="absolute bottom-[5%] left-[35%] h-[180px] w-[180px] rounded-full bg-violet-500/20 blur-[60px] animate-pulse [animation-delay:-4s]" />
@@ -572,7 +658,10 @@ export default function App(){
       {/* TOASTS */}
       <div className="fixed bottom-4 right-4 z-[100] flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map(t=>(
-          <div key={t.id} className={`pointer-events-auto rounded-2xl border px-4 py-3 text-[13px] font-bold shadow-2xl backdrop-blur-xl animate-[slideUp_0.35s_cubic-bezier(0.22,1,0.36,1)] ${theme==="dark"?"bg-slate-900/90 border-white/10 text-white":"bg-white/90 border-slate-200 text-slate-900"} ${t.type==="ok"?"!border-emerald-500/40":t.type==="err"?"!border-red-500/40":"!border-sky-500/30"}`}>{t.msg}</div>
+          <div key={t.id} className={`toast-item pointer-events-auto flex items-center gap-2 rounded-2xl border px-4 py-3 text-[13px] font-bold shadow-2xl backdrop-blur-xl animate-[slideUp_0.35s_cubic-bezier(0.22,1,0.36,1)] ${theme==="dark"?"bg-slate-900/90 border-white/10 text-white":"bg-white/95 border-slate-200 text-slate-900"} ${t.type==="ok"?"!border-emerald-500/40":t.type==="err"?"!border-red-500/40":"!border-sky-500/30"}`}>
+            {t.type==="ok"?<CheckCircle2 size={16} className="shrink-0 text-emerald-400" />:t.type==="err"?<AlertTriangle size={16} className="shrink-0 text-red-400" />:<HelpCircle size={16} className="shrink-0 text-sky-400" />}
+            <span>{t.msg}</span>
+          </div>
         ))}
       </div>
 
@@ -580,8 +669,8 @@ export default function App(){
         {/* HEADER */}
         <header className="flex flex-wrap items-center justify-between gap-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="relative grid h-[52px] w-[52px] place-items-center overflow-hidden rounded-[14px] bg-gradient-to-br from-indigo-600 to-cyan-400 shadow-[0_0_24px_rgba(99,102,241,0.35)]">
-              <img src={INLINE_ICON_SVG} alt="Surakshit Vault icon" className="h-[36px] w-[36px] object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
+            <div className="animate-glow relative grid h-[52px] w-[52px] place-items-center overflow-hidden rounded-[14px] bg-gradient-to-br from-indigo-600 to-cyan-400 shadow-[0_0_24px_rgba(99,102,241,0.35)] transition-transform hover:scale-110 active:scale-95">
+              <img src={INLINE_ICON_SVG} alt="Surakshit Vault icon" className="animate-float h-[36px] w-[36px] object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
               <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
             </div>
             <div>
@@ -590,7 +679,7 @@ export default function App(){
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-bold tracking-wide text-slate-300 backdrop-blur"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.15)]" />CLIENT-SIDE ONLY • OFFLINE</span>
+            <span className="header-pill inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-bold tracking-wide text-slate-300 backdrop-blur"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.15)]" />CLIENT-SIDE ONLY • OFFLINE</span>
             <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10">{theme==="dark"?<><Sun size={14} /> Light</>:<><Moon size={14} /> Dark</>}</button>
             <button onClick={()=>setSettingsOpen(true)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10"><SettingsIcon size={14} /> Settings</button>
             <button onClick={()=>setHelpOpen(true)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10"><HelpCircle size={14} /> Help</button>
@@ -605,9 +694,9 @@ export default function App(){
             {k:"Keys Generated", v:stats.keys},
             {k:"PBKDF2 Iterations", v:"1,000,000"},
           ].map(s=>(
-            <div key={s.k} className={`relative overflow-hidden rounded-2xl border p-4 backdrop-blur-xl ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/70 border-slate-200 shadow-sm"}`}>
+            <div key={s.k} className={`stat-card relative overflow-hidden rounded-2xl border p-4 backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/80 border-slate-200 shadow-sm"}`}>
               <div className="text-[11px] font-bold tracking-widest text-slate-400 uppercase">{s.k}</div>
-              <div className="mt-1 text-[22px] font-extrabold bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">{String(s.v)}</div>
+              <div className={`mt-1 text-[22px] font-extrabold bg-clip-text text-transparent ${theme==="dark"?"bg-gradient-to-r from-white to-indigo-200":"bg-gradient-to-r from-slate-900 to-indigo-700"}`}>{String(s.v)}</div>
               <div className="pointer-events-none absolute -right-6 -bottom-8 h-20 w-20 rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.22),transparent_70%)]" />
             </div>
           ))}
@@ -615,7 +704,7 @@ export default function App(){
 
         {/* TABS */}
         <div className="sticky top-3 z-30 mb-4">
-          <div className={`flex gap-1.5 overflow-x-auto rounded-2xl border p-1.5 backdrop-blur-xl scrollbar-none ${theme==="dark"?"bg-slate-900/60 border-white/10":"bg-white/70 border-slate-200 shadow-sm"}`}>
+          <div className={`tab-bar flex gap-1 overflow-x-auto rounded-2xl border p-1.5 backdrop-blur-xl scrollbar-none ${theme==="dark"?"bg-slate-900/60 border-white/10":"bg-white/85 border-slate-200 shadow-sm"}`}>
             {[
               {id:"notes", l:"Notes", I:FileText},
               {id:"jwt", l:"JWT", I:KeyRound},
@@ -627,7 +716,7 @@ export default function App(){
               {id:"suite", l:"Hub", I:Rocket},
               {id:"contact", l:"Contact", I:Mail},
             ].map(t=>(
-              <button key={t.id} onClick={()=>setTab(t.id as Tab)} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-bold transition-all ${tab===t.id ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-[0_8px_24px_rgba(99,102,241,0.35)]" : "text-slate-400 hover:text-slate-100 hover:bg-white/5"}`}><t.I size={15} /> {t.l}</button>
+              <button key={t.id} onClick={()=>goToTab(t.id as Tab)} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-[12px] sm:text-[13px] sm:px-4 font-bold transition-all duration-200 ${tab===t.id ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-[0_8px_24px_rgba(99,102,241,0.35)] scale-[1.02]" : "tab-inactive text-slate-400 hover:text-slate-100 hover:bg-white/5"}`}><t.I size={14} /> {t.l}</button>
             ))}
           </div>
         </div>
@@ -769,7 +858,7 @@ export default function App(){
                   <div className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[#05070f] p-3 font-mono text-[13px] leading-relaxed text-emerald-200 shadow-inner">{decrypted}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <CopyBtn text={decrypted} label="Copy Text" className="flex-1 justify-center bg-emerald-600 hover:bg-emerald-500 text-white border-0 py-2.5" />
-                    <button onClick={()=>{ setPlain(decrypted); setTab("notes"); toast("Loaded to encrypt panel","ok") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><RefreshCw size={14} /> Re-encrypt</button>
+                    <button onClick={()=>{ setPlain(decrypted); goToTab("notes"); toast("Loaded to encrypt panel","ok") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><RefreshCw size={14} /> Re-encrypt</button>
                     <button onClick={()=>{ setDecrypted(""); setBurnLeft(0); toast("Cleared","info") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/5 px-4 py-2.5 text-[13px] font-bold text-slate-400"><Eraser size={14} /> Clear</button>
                   </div>
                   <div className="mt-2 flex gap-2"><CopyBtn small text={decrypted} label="Copy (small)" /><button onClick={async()=>{ if(clipClear){ setTimeout(async()=>{ try{ await navigator.clipboard.writeText(""); toast("Clipboard cleared","ok") }catch{} },15000); toast("Will auto-clear clipboard in 15s","info") } }} className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-bold">Auto-clear clipboard</button></div>
@@ -840,7 +929,7 @@ export default function App(){
               <div className="mt-1 text-[11px] font-bold" style={{ color: pwStrength.color }}>Strength: {pwStrength.label}</div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <CopyBtn text={pwOut.includes("•")?"":pwOut} label="Copy" className="bg-emerald-600 text-white border-0" />
-                <button onClick={()=>{ setEncPw(pwOut.includes("•")?"":pwOut); setTab("notes"); toast("Applied to encrypt panel","ok") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><ChevronRight size={14} /> Use in Encrypt</button>
+                <button onClick={()=>{ setEncPw(pwOut.includes("•")?"":pwOut); goToTab("notes"); toast("Applied to encrypt panel","ok") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><ChevronRight size={14} /> Use in Encrypt</button>
                 <button onClick={()=>genPw()} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><RefreshCw size={14} /> Regen</button>
               </div>
             </div>
@@ -921,7 +1010,7 @@ export default function App(){
                   <div key={it.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                     <div><div className="text-[13px] font-bold">{it.title}</div><div className="text-[11px] text-slate-400">{new Date(it.createdAt).toLocaleString()} • {it.payload.length} chars • TTL {it.ttl||0}d</div></div>
                     <div className="flex gap-1.5">
-                      <button onClick={()=>{ setPendingPayload(it.payload); setSelectedFile(null); setTab("notes"); toast("Loaded to decrypt","ok") }} className="rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-bold text-white">Load</button>
+                      <button onClick={()=>{ setPendingPayload(it.payload); setSelectedFile(null); goToTab("notes"); toast("Loaded to decrypt","ok") }} className="rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-bold text-white">Load</button>
                       <CopyBtn small text={it.payload} label="Copy" />
                       <button onClick={()=>{ if(confirm("Delete?")) setVault(v=>v.filter((_,i)=>i!==idx)) }} className="rounded-full bg-white/10 px-2.5 py-1.5 text-[11px] font-bold">Del</button>
                     </div>
@@ -969,9 +1058,11 @@ export default function App(){
                 {id:"suite", I:FileLock2, t:"Protected PDF", d:"Password-locked QR archive"},
                 {id:"contact", I:Mail, t:"Contact Us", d:"Enterprise, security, support"},
               ].map(c=>(
-                <button key={c.t} onClick={()=>{ if(c.id!=="suite") setTab(c.id as Tab); else setTab("notes") }} className={`group text-left rounded-[1.15rem] border p-4 transition-all hover:-translate-y-1 hover:border-indigo-500/40 hover:shadow-[0_16px_40px_rgba(99,102,241,0.15)] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/80 border-slate-200 shadow-sm"}`}>
-                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-cyan-400/15 text-indigo-300"><c.I size={19} /></div><div className="mt-3 text-[14px] font-extrabold">{c.t}</div><div className="mt-1 text-[12px] leading-snug text-slate-400">{c.d}</div>
-                  <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-300">Open <ChevronRight size={12} className="transition group-hover:translate-x-0.5" /></div>
+                <button key={c.t} onClick={()=>{ if(c.id!=="suite") goToTab(c.id as Tab); else goToTab("notes") }} className={`group text-left rounded-[1.15rem] border p-4 transition-all duration-300 hover:-translate-y-2 hover:border-indigo-500/40 hover:shadow-[0_20px_50px_rgba(99,102,241,0.2)] active:scale-[0.97] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/85 border-slate-200 shadow-sm hover:shadow-lg"}`}>
+                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-indigo-500/25 to-cyan-400/20 text-indigo-300 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"><c.I size={20} /></div>
+                  <div className="mt-3 text-[14px] font-extrabold">{c.t}</div>
+                  <div className="mt-1 text-[12px] leading-snug text-slate-400">{c.d}</div>
+                  <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-300 transition-transform group-hover:translate-x-1">Open <ChevronRight size={12} className="transition-transform group-hover:translate-x-1" /></div>
                 </button>
               ))}
             </div>
@@ -1117,7 +1208,20 @@ export default function App(){
         </div>
       )}
 
-      <style>{`@keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:none}} @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}} .scrollbar-none::-webkit-scrollbar{display:none} .scrollbar-none{scrollbar-width:none}`}</style>
+      <style>{`
+        @keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:none}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        @keyframes bounceIn{0%{transform:scale(0);opacity:0}50%{transform:scale(1.25)}100%{transform:scale(1);opacity:1}}
+        @keyframes panelSlide{from{opacity:0;transform:translateY(16px) scale(0.98);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+        @keyframes glow{0%,100%{box-shadow:0 0 12px rgba(99,102,241,0.3)}50%{box-shadow:0 0 28px rgba(34,211,238,0.45)}}
+        @keyframes float{0%,100%{transform:translateY(0px)}50%{transform:translateY(-6px)}}
+        .scrollbar-none::-webkit-scrollbar{display:none} .scrollbar-none{scrollbar-width:none}
+        .animate-panel{animation:panelSlide 0.4s cubic-bezier(0.22,1,0.36,1) both}
+        .animate-glow{animation:glow 3s ease-in-out infinite}
+        .animate-float{animation:float 6s ease-in-out infinite}
+        /* Smooth transitions for all interactive elements */
+        button,a,input,textarea,select{transition:all 0.2s cubic-bezier(0.22,1,0.36,1)}
+      `}</style>
     </div>
   )
 }
