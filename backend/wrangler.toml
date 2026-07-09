@@ -1,0 +1,30 @@
+name = "surakshit-backend"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# === D1 SQLite Database ===
+[[d1_databases]]
+binding = "DB"
+database_name = "surakshit-vault-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# === R2 Bucket for large encrypted blobs ===
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "surakshit-vault-blobs"
+
+# === KV for rate limiting ===
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# === Public environment variables ===
+[vars]
+TURNSTILE_SITE_KEY = "REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY"
+CORS_ORIGIN = "https://surakshit-vault-pro.pages.dev"
+
+# === Secrets (set via CLI, NOT here) ===
+# wrangler secret put JWT_SECRET
+# wrangler secret put TURNSTILE_SECRET
+# wrangler secret put IP_HASH_SALT

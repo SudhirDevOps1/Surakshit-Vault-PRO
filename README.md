@@ -150,6 +150,17 @@
 - Direct submission to Surakshit Labs secure endpoint
 - Loading state + success animation
 
+### 11. ☁️ Optional Cloud Sync (Zero-Knowledge)
+- **Multi-user signup/login** with your own Cloudflare backend
+- **Zero-Knowledge**: server never sees your password or plaintext
+- **PBKDF2 200K** for auth hash + **PBKDF2 1M** for encryption key (both client-side)
+- **Cloudflare stack**: Workers + D1 SQLite + R2 (blobs) + KV (rate limit) + Turnstile CAPTCHA
+- **Account lockout** after 5 failed logins (15 min)
+- **JWT** sessions with revocation
+- **GDPR** compliant `/account` delete endpoint
+- **Rate limited**, **audit logged** (hashed IPs)
+- Deploy your own in 5 minutes → see **[BACKEND.md](BACKEND.md)**
+
 ---
 
 ## 🛡️ Security Architecture

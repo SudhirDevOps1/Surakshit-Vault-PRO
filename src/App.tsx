@@ -8,7 +8,8 @@ import {
   Download, FileDown, Link2, Camera, ClipboardPaste, Flame, Shield, ShieldCheck, Zap,
   RefreshCw, Trash2, Eraser, Send, Search, Upload, FolderDown, AlertTriangle, Fingerprint,
   QrCode, Sparkles, ScanLine, X, Shuffle, Delete, CheckCircle2, Glasses, FileLock2, BookOpen,
-  BarChart3, Clock, ChevronRight, Loader2, ListChecks, Building2, ShieldAlert, Scale
+  BarChart3, Clock, ChevronRight, Loader2, ListChecks, Building2, ShieldAlert, Scale, Cloud,
+  User as UserIcon, LogIn, LogOut, UserPlus, RefreshCcw, Wifi, WifiOff
 } from "lucide-react"
 
 /* ============== CONST & TYPES ============== */
@@ -18,7 +19,9 @@ const IV_BYTES = 12
 const VAULT_KEY = "sn_vault_pro_v4"
 const STATS_KEY = "sn_stats_pro_v4"
 const SETTINGS_KEY = "sn_settings_pro_v4"
-const APP_VERSION = "4.1.0"
+const AUTH_KEY = "sn_auth_pro_v4"
+const APP_VERSION = "5.0.0"
+const AUTH_PBKDF2_ITER = 200_000 // For server auth hash (lighter than 1M master key)
 
 type Tab = "notes" | "jwt" | "password" | "hash" | "base64" | "apikey" | "vault" | "suite" | "contact"
 const VALID_TABS: Tab[] = ["notes", "jwt", "password", "hash", "base64", "apikey", "vault", "suite", "contact"]
@@ -146,54 +149,87 @@ function strengthScore(pw: string) {
   return { pct:(s/6)*100, label: labels[Math.min(s,6)], color: colors[Math.min(s,6)] }
 }
 
-/* ============== CONFETTI PARTICLES ============== */
-function burstParticles(x?: number, y?: number) {
-  const cx = x ?? window.innerWidth / 2, cy = y ?? window.innerHeight / 2
-  const colors = ["#6366f1","#22d3ee","#a855f7","#34d399","#fbbf24","#f87171","#3b82f6","#ec4899"]
-  const count = 35
-  const container = document.createElement("div")
-  container.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden"
-  document.body.appendChild(container)
-  for (let i = 0; i < count; i++) {
-    const p = document.createElement("div")
-    const size = 4 + Math.random() * 8
-    const color = colors[Math.floor(Math.random() * colors.length)]
-    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.6
-    const vel = 120 + Math.random() * 200
-    const dx = Math.cos(angle) * vel, dy = Math.sin(angle) * vel - 80
-    const rot = Math.random() * 720 - 360
-    const dur = 0.6 + Math.random() * 0.5
-    const isCircle = Math.random() > 0.5
-    p.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:${size}px;height:${isCircle ? size : size*0.45}px;background:${color};border-radius:${isCircle?"50%":"2px"};opacity:1;transform:translate(-50%,-50%);pointer-events:none`
-    p.animate([
-      { transform: "translate(-50%,-50%) rotate(0deg) scale(1)", opacity: 1 },
-      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${rot}deg) scale(0.2)`, opacity: 0 }
-    ], { duration: dur * 1000, easing: "cubic-bezier(0.25,0.46,0.45,0.94)", fill: "forwards" })
-    container.appendChild(p)
-  }
-  setTimeout(() => container.remove(), 1400)
+/* ============== CONFETTI CELEBRATION ============== */
+type ConfettiParticle = { x:number; y:number; vx:number; vy:number; g:number; s:number; a:number; color:string; r:number; spin:number; shape:number }
+let confettiBus: ((x:number,y:number,count?:number)=>void) | null = null
+const CONFETTI_COLORS = ["#6366f1","#22d3ee","#a855f7","#34d399","#fbbf24","#f472b6","#60a5fa","#f97316","#eab308","#14b8a6"]
+function celebrate(x?: number, y?: number, count = 70) {
+  const cx = x ?? (typeof window !== "undefined" ? window.innerWidth/2 : 0)
+  const cy = y ?? (typeof window !== "undefined" ? window.innerHeight*0.35 : 0)
+  confettiBus?.(cx, cy, count)
 }
 
 /* ============== SMALL COMPONENTS ============== */
 function CopyBtn({ text, className="", label="Copy", small }: { text: string; className?: string; label?: string; small?: boolean }) {
   const [copied,setCopied] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
   return (
     <button
-      ref={btnRef}
       onClick={async(e)=>{
-        if(!text) return
-        try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(()=>setCopied(false),1600) } catch {
-          const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); setCopied(true); setTimeout(()=>setCopied(false),1600)
+        if(!text || text==="—" || text.includes("•")) return
+        let ok=false
+        try { await navigator.clipboard.writeText(text); ok=true } catch {
+          const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); ok=!!document.execCommand("copy"); ta.remove()
         }
-        // Particle burst from button position
-        const rect = btnRef.current?.getBoundingClientRect()
-        if(rect) burstParticles(rect.left + rect.width/2, rect.top + rect.height/2)
-        else burstParticles(e.clientX, e.clientY)
+        if(ok){
+          setCopied(true)
+          celebrate(e.clientX, e.clientY, small ? 40 : 70)
+          window.dispatchEvent(new CustomEvent("sv-copy-success", { detail: { label } }))
+          setTimeout(()=>setCopied(false),1800)
+        }
       }}
-      className={`inline-flex items-center justify-center gap-1.5 font-bold transition-all duration-200 active:scale-[0.93] ${small ? "text-[11px] px-2.5 py-1 rounded-full" : "text-[13px] px-3 py-2 rounded-xl"} ${copied ? "bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.4)] scale-105" : "bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10 dark:text-slate-200 hover:shadow-md"} ${className}`}
-    >{copied ? <><Check size={small?12:15} className="animate-[bounceIn_0.3s]" /> Copied!</> : <><Copy size={small?12:15} /> {label}</>}</button>
+      className={`inline-flex items-center justify-center gap-1.5 font-bold transition-all duration-200 active:scale-[0.96] hover:-translate-y-0.5 ${small ? "text-[11px] px-2.5 py-1 rounded-full" : "text-[13px] px-3 py-2 rounded-xl"} ${copied ? "bg-emerald-500 text-white shadow-[0_0_24px_rgba(16,185,129,0.45)] scale-105" : "btn-soft border"} ${className}`}
+    >{copied ? <><Check size={small?12:15} className="animate-[pop_0.35s_ease]" /> Copied!</> : <><Copy size={small?12:15} /> {label}</>}</button>
   )
+}
+
+function ConfettiLayer() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const particles = useRef<ConfettiParticle[]>([])
+  const raf = useRef(0)
+  useEffect(()=>{
+    const canvas = canvasRef.current
+    if(!canvas) return
+    const ctx = canvas.getContext("2d")
+    if(!ctx) return
+    const resize = ()=>{ canvas.width = window.innerWidth * Math.min(devicePixelRatio||1,2); canvas.height = window.innerHeight * Math.min(devicePixelRatio||1,2); ctx.setTransform(Math.min(devicePixelRatio||1,2),0,0,Math.min(devicePixelRatio||1,2),0,0) }
+    resize()
+    window.addEventListener("resize", resize)
+    confettiBus = (x,y,count=70)=>{
+      for(let i=0;i<(count||70);i++){
+        particles.current.push({
+          x, y,
+          vx: (Math.random()-0.5)*14,
+          vy: Math.random()*-11-3,
+          g: 0.18+Math.random()*0.12,
+          s: 4+Math.random()*7,
+          a: 1,
+          color: CONFETTI_COLORS[Math.floor(Math.random()*CONFETTI_COLORS.length)],
+          r: Math.random()*Math.PI,
+          spin: (Math.random()-0.5)*0.28,
+          shape: Math.floor(Math.random()*3),
+        })
+      }
+    }
+    const tick = ()=>{
+      ctx.clearRect(0,0,window.innerWidth,window.innerHeight)
+      particles.current = particles.current.filter(p=>p.a>0.03 && p.y < window.innerHeight+40)
+      for(const p of particles.current){
+        p.vy += p.g; p.x += p.vx; p.y += p.vy; p.a *= 0.985; p.r += p.spin; p.vx *= 0.995
+        ctx.globalAlpha = Math.max(0,p.a)
+        ctx.fillStyle = p.color
+        ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r)
+        if(p.shape===0) ctx.fillRect(-p.s/2,-p.s/2,p.s,p.s*0.55)
+        else if(p.shape===1){ ctx.beginPath(); ctx.arc(0,0,p.s*0.4,0,Math.PI*2); ctx.fill() }
+        else { ctx.beginPath(); ctx.moveTo(0,-p.s/2); ctx.lineTo(p.s/2,p.s/2); ctx.lineTo(-p.s/2,p.s/2); ctx.closePath(); ctx.fill() }
+        ctx.restore()
+      }
+      ctx.globalAlpha = 1
+      raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return ()=>{ cancelAnimationFrame(raf.current); window.removeEventListener("resize", resize); confettiBus=null }
+  },[])
+  return <canvas ref={canvasRef} className="pointer-events-none fixed inset-0 z-[95]" aria-hidden />
 }
 
 /* ============== MAIN APP ============== */
@@ -232,7 +268,16 @@ export default function App(){
   }, [tab])
 
   const [toasts,setToasts] = useState<Toast[]>([])
-  const toast = (msg:string,type:Toast["type"]="ok")=>{ const id=Date.now()+Math.random(); setToasts(t=>[...t,{id,msg,type}]); setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),2800) }
+  const toast = (msg:string,type:Toast["type"]="ok")=>{ const id=Date.now()+Math.random(); setToasts(t=>[...t,{id,msg,type}]); setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3000) }
+  // Celebrate on any CopyBtn success + show congrats toast
+  useEffect(()=>{
+    const onCopy = (e: Event) => {
+      const label = (e as CustomEvent).detail?.label || "Text"
+      toast(`🎉 Copied! ${label} — Congrats, secure clipboard!`,"ok")
+    }
+    window.addEventListener("sv-copy-success", onCopy as EventListener)
+    return ()=> window.removeEventListener("sv-copy-success", onCopy as EventListener)
+  },[])
 
   // STATS
   const [stats,setStats] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(STATS_KEY)||'{"enc":0,"dec":0,"keys":0}') } catch{return {enc:0,dec:0,keys:0}} })
@@ -264,6 +309,178 @@ export default function App(){
   const [saveVault,setSaveVault]=useState(true)
   const [burn,setBurn]=useState(true)
   const [clipClear,setClipClear]=useState(true)
+
+  // BACKEND SYNC & AUTH STATE (multi-user zero-knowledge)
+  const [cloudEnabled, setCloudEnabled] = useState(false)
+  const [workerUrl, setWorkerUrl] = useState("")
+  const [workerSecret, setWorkerSecret] = useState("") // legacy (single-user), still supported
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "done" | "error">("idle")
+  const [authOpen, setAuthOpen] = useState(false)
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login")
+  const [authEmail, setAuthEmail] = useState("")
+  const [authPw, setAuthPw] = useState("")
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState("")
+  const [session, setSession] = useState<{ jwt: string; user_id: string; email: string } | null>(null)
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("")
+  const [turnstileToken, setTurnstileToken] = useState("")
+  const [cloudVault, setCloudVault] = useState<Array<{id:string;size_bytes:number;created_at:number;updated_at:number}>>([])
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator!=="undefined"?navigator.onLine:true)
+
+  // Derive auth hash from password (client-side, never sends raw password)
+  async function deriveAuthHash(password: string, saltB64: string, iterations = AUTH_PBKDF2_ITER): Promise<string> {
+    const salt = base64ToBytes(saltB64)
+    const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"])
+    const bits = await crypto.subtle.deriveBits({ name:"PBKDF2", salt: salt as any, iterations, hash:"SHA-256" }, km, 256)
+    return bytesToBase64(new Uint8Array(bits))
+  }
+
+  // Restore session on load
+  useEffect(()=>{
+    try {
+      const s = JSON.parse(localStorage.getItem(AUTH_KEY) || "null")
+      if (s?.jwt && s?.user_id) setSession(s)
+    } catch {}
+    const on = ()=>setIsOnline(true), off = ()=>setIsOnline(false)
+    window.addEventListener("online", on); window.addEventListener("offline", off)
+    return ()=>{ window.removeEventListener("online", on); window.removeEventListener("offline", off) }
+  },[])
+  useEffect(()=>{
+    if (session) localStorage.setItem(AUTH_KEY, JSON.stringify(session))
+    else localStorage.removeItem(AUTH_KEY)
+  },[session])
+
+  // Fetch Turnstile site key from backend (if configured)
+  useEffect(()=>{
+    if (!cloudEnabled || !workerUrl) return
+    fetch(`${workerUrl.replace(/\/$/,"")}/`).then(r=>r.json()).then((d:any)=>{
+      if (d?.turnstile_site_key) setTurnstileSiteKey(d.turnstile_site_key)
+    }).catch(()=>{})
+  },[cloudEnabled, workerUrl])
+
+  // Signup
+  async function handleSignup(){
+    if (!authEmail.trim() || !authPw) { setAuthError("Email + password required"); return }
+    if (authPw.length < 8) { setAuthError("Password min 8 chars"); return }
+    if (!workerUrl) { setAuthError("Backend URL required in Settings"); return }
+    setAuthBusy(true); setAuthError("")
+    try {
+      // Generate salt client-side
+      const salt = bytesToBase64(randomBytes(16))
+      const authHash = await deriveAuthHash(authPw, salt)
+      const res = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/signup`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), salt, authHash, turnstile: turnstileToken || "dev" })
+      })
+      const data = await res.json() as any
+      if (!res.ok) throw new Error(data.error || "Signup failed")
+      setSession({ jwt: data.jwt, user_id: data.user_id, email: data.email })
+      setAuthOpen(false); setAuthEmail(""); setAuthPw(""); setTurnstileToken("")
+      toast("🎉 Account created! Cloud sync active.","ok"); celebrate(undefined, undefined, 90)
+    } catch(e:any){ setAuthError(e.message || "Signup failed"); toast("Signup failed: "+e.message,"err") }
+    finally { setAuthBusy(false) }
+  }
+
+  // Login
+  async function handleLogin(){
+    if (!authEmail.trim() || !authPw) { setAuthError("Email + password required"); return }
+    if (!workerUrl) { setAuthError("Backend URL required in Settings"); return }
+    setAuthBusy(true); setAuthError("")
+    try {
+      // 1. Get salt for this email
+      const saltRes = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/salt?email=${encodeURIComponent(authEmail.trim().toLowerCase())}`)
+      const saltData = await saltRes.json() as any
+      if (!saltRes.ok || !saltData.salt) throw new Error("Cannot fetch salt")
+      // 2. Derive auth hash locally
+      const authHash = await deriveAuthHash(authPw, saltData.salt)
+      // 3. Login
+      const res = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/login`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), authHash, turnstile: turnstileToken || "dev" })
+      })
+      const data = await res.json() as any
+      if (!res.ok) throw new Error(data.error || "Login failed")
+      setSession({ jwt: data.jwt, user_id: data.user_id, email: data.email })
+      setAuthOpen(false); setAuthEmail(""); setAuthPw(""); setTurnstileToken("")
+      toast("✅ Logged in successfully","ok"); celebrate(undefined, undefined, 70)
+    } catch(e:any){ setAuthError(e.message || "Login failed"); toast("Login failed: "+e.message,"err") }
+    finally { setAuthBusy(false) }
+  }
+
+  // Logout
+  async function handleLogout(){
+    if (session?.jwt && workerUrl) {
+      try {
+        await fetch(`${workerUrl.replace(/\/$/,"")}/auth/logout`, {
+          method:"POST", headers:{"Authorization":`Bearer ${session.jwt}`}
+        })
+      } catch {}
+    }
+    setSession(null); setCloudVault([]); toast("Logged out","info")
+  }
+
+  // Sync encrypted note to cloud (uses user session, not raw secret)
+  const syncToCloud = async (id: string, _t: string, p: string) => {
+    if (!cloudEnabled || !workerUrl) return
+    if (!session?.jwt) { toast("Login required for cloud sync","err"); return }
+    setSyncStatus("syncing")
+    try {
+      const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.jwt}` },
+        body: JSON.stringify({ note_id: id, ciphertext: p })
+      })
+      const data = await res.json() as any
+      if (!res.ok) throw new Error(data.error || "Sync failed")
+      setSyncStatus("done")
+      toast(`☁️ Synced to cloud (${data.size} bytes)`, "ok")
+      setTimeout(() => setSyncStatus("idle"), 3000)
+      loadCloudVault()
+    } catch (e:any) {
+      console.error("Sync Error:", e)
+      setSyncStatus("error")
+      toast(`❌ Sync failed: ${e.message}`, "err")
+      if (e.message?.includes("Invalid token") || e.message?.includes("revoked")) {
+        setSession(null)
+      }
+    }
+  }
+
+  async function loadCloudVault(){
+    if (!session?.jwt || !workerUrl) return
+    try {
+      const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/list`, {
+        headers: { "Authorization": `Bearer ${session.jwt}` }
+      })
+      const data = await res.json() as any
+      if (res.ok && data.items) setCloudVault(data.items)
+    } catch {}
+  }
+  useEffect(()=>{ if (session && cloudEnabled) loadCloudVault() },[session, cloudEnabled])
+
+  async function fetchCloudVaultItem(id: string): Promise<string | null> {
+    if (!session?.jwt || !workerUrl) return null
+    try {
+      const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/${id}`, {
+        headers: { "Authorization": `Bearer ${session.jwt}` }
+      })
+      const data = await res.json() as any
+      if (res.ok && data.ciphertext) return data.ciphertext
+    } catch {}
+    return null
+  }
+
+  async function deleteCloudVaultItem(id: string){
+    if (!session?.jwt || !workerUrl) return
+    try {
+      await fetch(`${workerUrl.replace(/\/$/, "")}/vault/${id}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${session.jwt}` }
+      })
+      toast("Deleted from cloud","ok")
+      loadCloudVault()
+    } catch { toast("Delete failed","err") }
+  }
 
   // DECRYPT
   const [selectedFile,setSelectedFile]=useState<File|null>(null)
@@ -455,8 +672,16 @@ export default function App(){
       }
       // setPayload triggers useEffect which renders QR + sets qrDataUrl (see useEffect above)
       setPayload(pl)
-      if(saveVault) setVault(v=>[{ id: crypto.randomUUID?.()||String(Date.now()), title: title.trim()||"Secure note", payload: pl, createdAt: Date.now(), ttl: Number(ttl)||0 } as VaultItem, ...v].slice(0,60))
-      bump("enc"); setEncStatus({type:"ok",msg: deniable?"✅ Deniable QR ready — 2 keys, 1 QR":"✅ Encrypted & QR generated"}); toast("Encrypted ✓","ok")
+      const noteId = crypto.randomUUID?.() || String(Date.now())
+      if(saveVault) setVault(v=>[{ id: noteId, title: title.trim()||"Secure note", payload: pl, createdAt: Date.now(), ttl: Number(ttl)||0 } as VaultItem, ...v].slice(0,60))
+      
+      // TRIGGER CLOUD SYNC IF ENABLED
+      if (cloudEnabled && workerUrl) {
+        syncToCloud(noteId, title.trim()||"Secure note", pl)
+      }
+
+      bump("enc"); setEncStatus({type:"ok",msg: deniable?"✅ Deniable QR ready — 2 keys, 1 QR":"✅ Encrypted & QR generated"}); toast("🎉 Encrypted successfully!","ok")
+      celebrate(undefined, undefined, 100)
       setEncProgress(100); setTimeout(()=>setEncProgress(0),1200)
     }catch(e:any){
       console.error("Encryption error:", e)
@@ -519,7 +744,7 @@ export default function App(){
       setDecProgress(60)
       await new Promise(r=>setTimeout(r,40))
       const pt = await decryptPayload(data, decPw)
-      setDecrypted(pt); setBurnLeft(burn?10:0); bump("dec"); setDecStatus({type:"ok",msg:"✅ Decrypt success"}); toast("Decrypted ✓","ok"); setDecProgress(100)
+      setDecrypted(pt); setBurnLeft(burn?10:0); bump("dec"); setDecStatus({type:"ok",msg:"✅ Decrypt success"}); toast("🎉 Decrypted successfully!","ok"); celebrate(undefined, undefined, 90); setDecProgress(100)
     }catch(e:any){
       console.error("Decrypt error:", e, "message:", e?.message, "name:", e?.name)
       const m=e?.message
@@ -616,7 +841,7 @@ export default function App(){
     else if(jwtFmt==="base64") out=bytesToBase64(bytes)
     else if(jwtFmt==="base64url") out=toB64Url(bytes)
     else out=Array.from(bytes).map(b=>"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[b%62]).join("")
-    setJwtSecret(out); setJwtShow(jwtAlways); bump("keys"); toast("JWT secret generated","ok")
+    setJwtSecret(out); setJwtShow(jwtAlways); bump("keys"); toast("🎉 JWT secret generated!","ok"); celebrate(undefined, undefined, 80)
   }
 
   // PW GEN
@@ -629,82 +854,125 @@ export default function App(){
     else{
       let chars=""; if(pwUpper) chars+="ABCDEFGHIJKLMNOPQRSTUVWXYZ"; if(pwLower) chars+="abcdefghijklmnopqrstuvwxyz"; if(pwDigits) chars+="0123456789"; if(pwSymbols) chars+="!@#$%^&*_-+=?"; if(pwNoAmbig) chars=chars.replace(/[O0Il1]/g,""); if(!chars) chars="abcdefghijklmnopqrstuvwxyz"; out=Array.from(randomBytes(pwLen)).map(b=>chars[b%chars.length]).join("")
     }
-    setPwOut(out); setPwHist(h=>[out,...h].slice(0,8)); bump("keys"); return out
+    setPwOut(out); setPwHist(h=>[out,...h].slice(0,8)); bump("keys"); toast("🎉 Password generated!","ok"); celebrate(undefined, undefined, 70); return out
   }
 
-  async function doHashes(){ if(!hashInput.trim()){toast("Enter text","err");return} const enc=new TextEncoder(); const sha=async(a:AlgorithmIdentifier,t:string)=>toHex(new Uint8Array(await crypto.subtle.digest(a,enc.encode(t)))); setHashes({ s1:await sha("SHA-1",hashInput), s256:await sha("SHA-256",hashInput), s384:await sha("SHA-384",hashInput), s512:await sha("SHA-512",hashInput) }); toast("Hashes computed","ok") }
+  async function doHashes(){ if(!hashInput.trim()){toast("Enter text","err");return} const enc=new TextEncoder(); const sha=async(a:AlgorithmIdentifier,t:string)=>toHex(new Uint8Array(await crypto.subtle.digest(a,enc.encode(t)))); setHashes({ s1:await sha("SHA-1",hashInput), s256:await sha("SHA-256",hashInput), s384:await sha("SHA-384",hashInput), s512:await sha("SHA-512",hashInput) }); toast("🎉 Hashes computed!","ok"); celebrate(undefined, undefined, 50) }
   function makeApiKey(){ const p=apiPrefix||""; if(apiFmt==="uuid") return p+(crypto.randomUUID?.()||toHex(randomBytes(16))); if(apiFmt==="hex") return p+toHex(randomBytes(32)); if(apiFmt==="b64") return p+bytesToBase64(randomBytes(32)); if(apiFmt==="sk") return "sk_live_"+toB64Url(randomBytes(24)); if(apiFmt==="ak") return "ak_"+toHex(randomBytes(20)); return p+toHex(randomBytes(16)) }
 
   const encStrength = strengthScore(encPw)
   const pwStrength = strengthScore(pwOut.includes("•") ? "" : pwOut)
   const filteredVault = vault.filter(v=>!vaultSearch || v.title.toLowerCase().includes(vaultSearch.toLowerCase()) || v.payload.includes(vaultSearch))
 
-  // persist settings
-  useEffect(()=>{ localStorage.setItem(SETTINGS_KEY, JSON.stringify({ saveVault, showPayload, burn, clipClear })) },[saveVault,showPayload,burn,clipClear])
-  useEffect(()=>{ try{ const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}"); if(typeof s.saveVault!=="undefined") setSaveVault(s.saveVault); if(typeof s.showPayload!=="undefined") setShowPayload(s.showPayload); if(typeof s.burn!=="undefined") setBurn(s.burn); if(typeof s.clipClear!=="undefined") setClipClear(s.clipClear) }catch{} },[])
+  // persist settings including cloud sync
+  useEffect(()=>{ 
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ 
+      saveVault, showPayload, burn, clipClear, 
+      cloudEnabled, workerUrl, workerSecret 
+    })) 
+  },[saveVault, showPayload, burn, clipClear, cloudEnabled, workerUrl, workerSecret])
+
+  useEffect(()=>{ 
+    try{ 
+      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}"); 
+      if(typeof s.saveVault!=="undefined") setSaveVault(s.saveVault);
+      if(typeof s.showPayload!=="undefined") setShowPayload(s.showPayload);
+      if(typeof s.burn!=="undefined") setBurn(s.burn);
+      if(typeof s.clipClear!=="undefined") setClipClear(s.clipClear);
+      if(typeof s.cloudEnabled!=="undefined") setCloudEnabled(s.cloudEnabled);
+      if(typeof s.workerUrl!=="undefined") setWorkerUrl(s.workerUrl);
+      if(typeof s.workerSecret!=="undefined") setWorkerSecret(s.workerSecret);
+    }catch{} 
+  },[])
+
+  const isLight = theme==="light"
+  const card = isLight ? "bg-white border-slate-200/90 shadow-[0_8px_30px_rgba(15,23,42,0.08)] text-slate-900" : "bg-white/[0.05] border-white/10 shadow-[0_16px_50px_rgba(0,0,0,0.3)] text-[#eef2ff]"
+  const soft = isLight ? "bg-slate-100 border-slate-200 text-slate-800 hover:bg-slate-200/80" : "bg-white/10 border-white/10 text-slate-200 hover:bg-white/15"
+  const muted = isLight ? "text-slate-600" : "text-slate-400"
 
   return (
-    <div className={`min-h-screen w-full font-[Outfit] antialiased selection:bg-indigo-500/30 ${theme==="dark" ? "bg-[#05070f] text-[#eef2ff]" : "bg-[#f1f5f9] text-slate-900"}`}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');`}</style>
+    <div data-theme={theme} className={`sv-app min-h-screen w-full font-[Outfit] antialiased selection:bg-indigo-500/30 transition-colors duration-300 ${isLight ? "bg-[#eef2f7] text-slate-900" : "bg-[#05070f] text-[#eef2ff]"}`}>
+      <ConfettiLayer />
 
-      {/* BG — adapts to theme */}
-      <div className={`pointer-events-none fixed inset-0 -z-10 transition-opacity duration-700 ${theme==="light"?"opacity-30":"opacity-100"}`}>
-        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_12%_-8%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(700px_420px_at_92%_8%,rgba(34,211,238,0.14),transparent_50%),radial-gradient(800px_500px_at_50%_100%,rgba(168,85,247,0.14),transparent_55%),linear-gradient(180deg,#05070f_0%,#0a1020_50%,#05070f_100%)]" />
-        <div className="absolute top-[8%] -left-16 h-[280px] w-[280px] rounded-full bg-indigo-600/30 blur-[60px] animate-pulse" />
-        <div className="absolute top-[55%] -right-10 h-[220px] w-[220px] rounded-full bg-cyan-400/20 blur-[60px] animate-pulse [animation-delay:-2s]" />
-        <div className="absolute bottom-[5%] left-[35%] h-[180px] w-[180px] rounded-full bg-violet-500/20 blur-[60px] animate-pulse [animation-delay:-4s]" />
+      {/* BG */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className={`absolute inset-0 ${isLight
+          ? "bg-[radial-gradient(900px_500px_at_12%_-8%,rgba(99,102,241,0.16),transparent_60%),radial-gradient(700px_420px_at_92%_8%,rgba(14,165,233,0.12),transparent_50%),radial-gradient(800px_500px_at_50%_100%,rgba(168,85,247,0.10),transparent_55%),linear-gradient(180deg,#f8fafc_0%,#e2e8f0_50%,#f1f5f9_100%)]"
+          : "bg-[radial-gradient(900px_500px_at_12%_-8%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(700px_420px_at_92%_8%,rgba(34,211,238,0.14),transparent_50%),radial-gradient(800px_500px_at_50%_100%,rgba(168,85,247,0.14),transparent_55%),linear-gradient(180deg,#05070f_0%,#0a1020_50%,#05070f_100%)]"}`} />
+        <div className={`absolute top-[8%] -left-16 h-[280px] w-[280px] rounded-full blur-[60px] animate-[floatOrb_14s_ease-in-out_infinite_alternate] ${isLight?"bg-indigo-400/25":"bg-indigo-600/30"}`} />
+        <div className={`absolute top-[55%] -right-10 h-[220px] w-[220px] rounded-full blur-[60px] animate-[floatOrb_14s_ease-in-out_infinite_alternate] [animation-delay:-2s] ${isLight?"bg-cyan-400/20":"bg-cyan-400/20"}`} />
+        <div className={`absolute bottom-[5%] left-[35%] h-[180px] w-[180px] rounded-full blur-[60px] animate-[floatOrb_14s_ease-in-out_infinite_alternate] [animation-delay:-4s] ${isLight?"bg-violet-400/20":"bg-violet-500/20"}`} />
       </div>
 
       {/* TOASTS */}
       <div className="fixed bottom-4 right-4 z-[100] flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map(t=>(
-          <div key={t.id} className={`toast-item pointer-events-auto flex items-center gap-2 rounded-2xl border px-4 py-3 text-[13px] font-bold shadow-2xl backdrop-blur-xl animate-[slideUp_0.35s_cubic-bezier(0.22,1,0.36,1)] ${theme==="dark"?"bg-slate-900/90 border-white/10 text-white":"bg-white/95 border-slate-200 text-slate-900"} ${t.type==="ok"?"!border-emerald-500/40":t.type==="err"?"!border-red-500/40":"!border-sky-500/30"}`}>
-            {t.type==="ok"?<CheckCircle2 size={16} className="shrink-0 text-emerald-400" />:t.type==="err"?<AlertTriangle size={16} className="shrink-0 text-red-400" />:<HelpCircle size={16} className="shrink-0 text-sky-400" />}
-            <span>{t.msg}</span>
-          </div>
+          <div key={t.id} className={`pointer-events-auto rounded-2xl border px-4 py-3 text-[13px] font-bold shadow-2xl backdrop-blur-xl animate-[slideUp_0.35s_cubic-bezier(0.22,1,0.36,1)] ${isLight?"bg-white/95 border-slate-200 text-slate-900":"bg-slate-900/90 border-white/10 text-white"} ${t.type==="ok"?"!border-emerald-500/50":t.type==="err"?"!border-red-500/50":"!border-sky-500/40"}`}>{t.msg}</div>
         ))}
       </div>
 
-      <div className="mx-auto w-[min(1220px,100%)] px-4 pb-10 pt-4">
+      <div className="mx-auto w-[min(1220px,100%)] px-3 sm:px-4 pb-10 pt-3 sm:pt-4">
         {/* HEADER */}
-        <header className="flex flex-wrap items-center justify-between gap-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="animate-glow relative grid h-[52px] w-[52px] place-items-center overflow-hidden rounded-[14px] bg-gradient-to-br from-indigo-600 to-cyan-400 shadow-[0_0_24px_rgba(99,102,241,0.35)] transition-transform hover:scale-110 active:scale-95">
-              <img src={INLINE_ICON_SVG} alt="Surakshit Vault icon" className="animate-float h-[36px] w-[36px] object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
+        <header className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 py-3 sm:py-4 animate-[fadeUp_0.5s_ease_both]">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <div className="relative grid h-[44px] w-[44px] sm:h-[52px] sm:w-[52px] shrink-0 place-items-center overflow-hidden rounded-[14px] bg-gradient-to-br from-indigo-600 to-cyan-400 shadow-[0_0_24px_rgba(99,102,241,0.35)] animate-[pulseGlow_3s_ease-in-out_infinite]">
+              <img src={INLINE_ICON_SVG} alt="Surakshit Vault icon" className="h-[30px] w-[30px] sm:h-[36px] sm:w-[36px] object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
               <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
             </div>
-            <div>
-              <h1 className="m-0 text-[clamp(1.05rem,2.4vw,1.6rem)] font-extrabold tracking-tight leading-[1.1]">Surakshit Vault <span className="bg-gradient-to-r from-indigo-400 to-cyan-300 bg-clip-text text-transparent">PRO</span></h1>
-              <p className="m-0 text-[11px] font-semibold tracking-widest text-slate-400 uppercase">Production Grade • AES-GCM-256 • Zero Backend • v{APP_VERSION}</p>
+            <div className="min-w-0">
+              <h1 className={`m-0 text-[clamp(1rem,2.4vw,1.6rem)] font-extrabold tracking-tight leading-[1.1] ${isLight?"text-slate-900":""}`}>Surakshit Vault <span className="bg-gradient-to-r from-indigo-500 to-cyan-400 bg-clip-text text-transparent">PRO</span></h1>
+              <p className={`m-0 truncate text-[10px] sm:text-[11px] font-semibold tracking-widest uppercase ${muted}`}>Production Grade • AES-GCM-256 • v{APP_VERSION}</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="header-pill inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-bold tracking-wide text-slate-300 backdrop-blur"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.15)]" />CLIENT-SIDE ONLY • OFFLINE</span>
-            <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10">{theme==="dark"?<><Sun size={14} /> Light</>:<><Moon size={14} /> Dark</>}</button>
-            <button onClick={()=>setSettingsOpen(true)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10"><SettingsIcon size={14} /> Settings</button>
-            <button onClick={()=>setHelpOpen(true)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold backdrop-blur hover:bg-white/10"><HelpCircle size={14} /> Help</button>
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {/* Online / Offline indicator */}
+            <span className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${isOnline ? (isLight?"border-emerald-200 bg-emerald-50 text-emerald-700":"border-emerald-500/30 bg-emerald-500/10 text-emerald-300") : (isLight?"border-amber-200 bg-amber-50 text-amber-700":"border-amber-500/30 bg-amber-500/10 text-amber-300")}`}>
+              {isOnline ? <><Wifi size={11} /> Online</> : <><WifiOff size={11} /> Offline</>}
+            </span>
+            {/* Cloud sync status */}
+            {cloudEnabled && session && (
+              <span className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${isLight?"border-cyan-200 bg-cyan-50 text-cyan-800":"border-cyan-500/30 bg-cyan-500/10 text-cyan-300"}`}>
+                <Cloud size={11} /> {syncStatus==="syncing" ? "Syncing…" : syncStatus==="done" ? "Synced ✓" : "Cloud Active"}
+              </span>
+            )}
+            {/* User / Login button */}
+            {session ? (
+              <div className="inline-flex items-center gap-1">
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold ${isLight?"border-indigo-200 bg-indigo-50 text-indigo-700":"border-indigo-500/30 bg-indigo-500/10 text-indigo-200"}`}>
+                  <UserIcon size={12} /> <span className="max-w-[90px] truncate">{session.email.split("@")[0]}</span>
+                </span>
+                <button onClick={handleLogout} title="Logout" className={`inline-flex items-center gap-1 rounded-full border px-2 py-1.5 text-[11px] font-bold transition hover:scale-105 ${soft}`}><LogOut size={12} /></button>
+              </div>
+            ) : cloudEnabled && workerUrl ? (
+              <button onClick={()=>{ setAuthMode("login"); setAuthOpen(true) }} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[12px] font-bold transition hover:scale-105 bg-gradient-to-r from-indigo-600 to-cyan-500 text-white border-transparent shadow-md hover:shadow-lg`}><LogIn size={13} /> Login</button>
+            ) : (
+              <span className={`hidden sm:inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-bold ${isLight?"border-emerald-200 bg-emerald-50 text-emerald-700":"border-white/10 bg-white/[0.06] text-slate-300"}`}><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.15)]" />OFFLINE MODE</span>
+            )}
+            <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 py-1.5 text-[12px] font-bold backdrop-blur transition hover:scale-105 ${soft}`}>{theme==="dark"?<><Sun size={14} /> Light</>:<><Moon size={14} /> Dark</>}</button>
+            <button onClick={()=>setSettingsOpen(true)} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 py-1.5 text-[12px] font-bold backdrop-blur transition hover:scale-105 ${soft}`}><SettingsIcon size={14} /> <span className="hidden xs:inline sm:inline">Settings</span></button>
+            <button onClick={()=>setHelpOpen(true)} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 py-1.5 text-[12px] font-bold backdrop-blur transition hover:scale-105 ${soft}`}><HelpCircle size={14} /> <span className="hidden sm:inline">Help</span></button>
           </div>
         </header>
 
         {/* STATS */}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4">
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4 animate-[fadeUp_0.55s_ease_both]">
           {[
             {k:"Notes Encrypted", v:stats.enc},
             {k:"Successful Decrypts", v:stats.dec},
             {k:"Keys Generated", v:stats.keys},
             {k:"PBKDF2 Iterations", v:"1,000,000"},
           ].map(s=>(
-            <div key={s.k} className={`stat-card relative overflow-hidden rounded-2xl border p-4 backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/80 border-slate-200 shadow-sm"}`}>
-              <div className="text-[11px] font-bold tracking-widest text-slate-400 uppercase">{s.k}</div>
-              <div className={`mt-1 text-[22px] font-extrabold bg-clip-text text-transparent ${theme==="dark"?"bg-gradient-to-r from-white to-indigo-200":"bg-gradient-to-r from-slate-900 to-indigo-700"}`}>{String(s.v)}</div>
-              <div className="pointer-events-none absolute -right-6 -bottom-8 h-20 w-20 rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.22),transparent_70%)]" />
+            <div key={s.k} className={`group relative overflow-hidden rounded-2xl border p-3 sm:p-4 backdrop-blur-xl transition hover:-translate-y-0.5 hover:shadow-lg ${card}`}>
+              <div className={`text-[10px] sm:text-[11px] font-bold tracking-widest uppercase ${muted}`}>{s.k}</div>
+              <div className={`mt-1 text-[18px] sm:text-[22px] font-extrabold ${isLight?"bg-gradient-to-r from-indigo-600 to-cyan-600 bg-clip-text text-transparent":"bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"}`}>{String(s.v)}</div>
+              <div className="pointer-events-none absolute -right-6 -bottom-8 h-20 w-20 rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.22),transparent_70%)] transition group-hover:scale-125" />
             </div>
           ))}
         </div>
 
         {/* TABS */}
-        <div className="sticky top-3 z-30 mb-4">
-          <div className={`tab-bar flex gap-1 overflow-x-auto rounded-2xl border p-1.5 backdrop-blur-xl scrollbar-none ${theme==="dark"?"bg-slate-900/60 border-white/10":"bg-white/85 border-slate-200 shadow-sm"}`}>
+        <div className="sticky top-2 sm:top-3 z-30 mb-4 animate-[fadeUp_0.6s_ease_both]">
+          <div className={`flex gap-1 sm:gap-1.5 overflow-x-auto rounded-2xl border p-1 sm:p-1.5 backdrop-blur-xl scrollbar-none shadow-sm ${isLight?"bg-white/90 border-slate-200":"bg-slate-900/60 border-white/10"}`}>
             {[
               {id:"notes", l:"Notes", I:FileText},
               {id:"jwt", l:"JWT", I:KeyRound},
@@ -716,14 +984,14 @@ export default function App(){
               {id:"suite", l:"Hub", I:Rocket},
               {id:"contact", l:"Contact", I:Mail},
             ].map(t=>(
-              <button key={t.id} onClick={()=>goToTab(t.id as Tab)} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-[12px] sm:text-[13px] sm:px-4 font-bold transition-all duration-200 ${tab===t.id ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-[0_8px_24px_rgba(99,102,241,0.35)] scale-[1.02]" : "tab-inactive text-slate-400 hover:text-slate-100 hover:bg-white/5"}`}><t.I size={14} /> {t.l}</button>
+              <button key={t.id} onClick={()=>goToTab(t.id as Tab)} className={`inline-flex items-center gap-1 sm:gap-1.5 whitespace-nowrap rounded-full px-2.5 sm:px-4 py-1.5 sm:py-2 text-[12px] sm:text-[13px] font-bold transition-all duration-300 ${tab===t.id ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-[0_8px_24px_rgba(99,102,241,0.35)] scale-[1.02]" : isLight?"text-slate-600 hover:text-slate-900 hover:bg-slate-100":"text-slate-400 hover:text-slate-100 hover:bg-white/5"}`}><t.I size={14} /> {t.l}</button>
             ))}
           </div>
         </div>
 
         {/* PANELS */}
         {tab==="notes" && (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div key="notes" className="grid gap-4 lg:grid-cols-2 panel-anim">
             {/* ENCRYPT */}
             <div className={`rounded-[1.25rem] border p-5 backdrop-blur-xl ${theme==="dark"?"bg-white/[0.05] border-white/10 shadow-[0_16px_50px_rgba(0,0,0,0.3)]":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Lock size={18} className="text-indigo-400" /> एन्क्रिप्ट → QR</h2><span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-indigo-300">AES-GCM-256 • H</span></div>
@@ -869,7 +1137,7 @@ export default function App(){
         )}
 
         {tab==="jwt" && (
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div key="jwt" className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr] panel-anim">
             <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><KeyRound size={18} className="text-indigo-400" /> JWT Secret Studio</h2><span className="rounded-full bg-indigo-500/15 px-2.5 py-1 text-[10px] font-bold text-indigo-300">CSPRNG • HS256/384/512</span></div>
               <p className="mb-4 text-[13px] leading-relaxed text-slate-400">High-entropy secrets for HS256/HS384/HS512. Inspired by jwtsecrets.com — production grade CSPRNG via Web Crypto.</p>
@@ -908,7 +1176,7 @@ export default function App(){
         )}
 
         {tab==="password" && (
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div key="password" className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr] panel-anim">
             <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Fingerprint size={18} className="text-emerald-400" /> Password Forge PRO</h2><span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold text-emerald-300">Web Crypto CSPRNG</span></div>
               <label className="flex justify-between text-[11px] font-bold uppercase tracking-widest text-slate-400"><span>Length</span><span>{pwLen}</span></label>
@@ -944,7 +1212,7 @@ export default function App(){
         )}
 
         {tab==="hash" && (
-          <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
+          <div key="hash" className={`rounded-[1.25rem] border p-5 panel-anim ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
             <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><HashIcon size={18} className="text-violet-400" /> Hash Lab PRO</h2><span className="rounded-full bg-violet-500/15 px-2.5 py-1 text-[10px] font-bold text-violet-200">SHA-1/256/384/512 via SubtleCrypto</span></div>
             <textarea value={hashInput} onChange={e=>setHashInput(e.target.value)} placeholder="Hash करने के लिए text डालें..." className={`min-h-[120px] w-full rounded-xl border p-3 text-sm outline-none ${theme==="dark"?"bg-[#070c18]/80 border-white/10 text-white":"bg-white border-slate-300 text-slate-900"}`} />
             <div className="mt-3 flex flex-wrap gap-2"><button onClick={doHashes} className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 px-5 py-2.5 text-[13px] font-extrabold text-white"><Zap size={15} /> Compute Hashes</button><button onClick={()=>{ setHashInput(""); setHashes({s1:"—",s256:"—",s384:"—",s512:"—"}) }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><Eraser size={14} /> Clear</button></div>
@@ -965,7 +1233,7 @@ export default function App(){
         )}
 
         {tab==="base64" && (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div key="base64" className="grid gap-4 lg:grid-cols-2 panel-anim">
             <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Package size={18} className="text-indigo-400" /> Base64 Encode</h2>
               <textarea value={b64In} onChange={e=>setB64In(e.target.value)} placeholder="Text to encode..." className={`mt-3 min-h-[120px] w-full rounded-xl border p-3 text-sm outline-none ${theme==="dark"?"bg-[#070c18]/80 border-white/10 text-white":"bg-white border-slate-300 text-slate-900"}`} />
@@ -984,7 +1252,7 @@ export default function App(){
         )}
 
         {tab==="apikey" && (
-          <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
+          <div key="apikey" className={`rounded-[1.25rem] border p-5 panel-anim ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
             <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Puzzle size={18} className="text-cyan-400" /> API Key Forge PRO</h2><span className="rounded-full bg-cyan-500/15 px-2.5 py-1 text-[10px] font-bold text-cyan-200">UUID / Hex / Base64 / Prefixed</span></div>
             <div className="flex flex-wrap gap-1.5">{[
               {id:"uuid",l:"UUID v4"},{id:"hex",l:"Hex 32B"},{id:"b64",l:"Base64 32B"},{id:"sk",l:"sk_live_*"},{id:"ak",l:"ak_*"}
@@ -993,14 +1261,14 @@ export default function App(){
               <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Prefix (optional)</label><input value={apiPrefix} onChange={e=>setApiPrefix(e.target.value)} placeholder="myapp_" className={`w-full rounded-xl border bg-[#070c18]/80 px-3 py-2.5 text-sm outline-none ${theme==="light"?"!bg-white border-slate-300 text-slate-900":"border-white/10 text-white"}`} /></div>
               <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Count (1-20)</label><input type="number" min={1} max={20} value={apiCount} onChange={e=>setApiCount(Math.min(20,Math.max(1,Number(e.target.value)||1)))} className={`w-full rounded-xl border bg-[#070c18]/80 px-3 py-2.5 text-sm outline-none ${theme==="light"?"!bg-white border-slate-300 text-slate-900":"border-white/10 text-white"}`} /></div>
             </div>
-            <button onClick={()=>{ const keys=Array.from({length:apiCount},()=>makeApiKey()).join("\n"); setApiOut(keys); bump("keys"); toast(`${apiCount} key(s) generated`,"ok") }} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 py-3 text-[14px] font-extrabold text-white"><Rocket size={16} /> Generate API Keys</button>
+            <button onClick={()=>{ const keys=Array.from({length:apiCount},()=>makeApiKey()).join("\n"); setApiOut(keys); bump("keys"); toast(`🎉 ${apiCount} key(s) generated!`,"ok"); celebrate(undefined, undefined, 60) }} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 py-3 text-[14px] font-extrabold text-white shadow-lg transition hover:scale-[1.01] active:scale-[0.99]"><Rocket size={16} /> Generate API Keys</button>
             <div className={`mt-4 min-h-[120px] whitespace-pre-wrap break-all rounded-xl border p-3 font-mono text-[12px] ${theme==="dark"?"bg-black/30 border-white/10 text-emerald-200":"bg-slate-50 border-slate-200 text-slate-800"}`}>{apiOut || "—"}</div>
             <div className="mt-3 flex gap-2"><CopyBtn text={apiOut} label="Copy All" className="bg-emerald-600 text-white border-0" /><button onClick={()=>setApiOut("")} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><Eraser size={14} /> Clear</button></div>
           </div>
         )}
 
         {tab==="vault" && (
-          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div key="vault" className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr] panel-anim">
             <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Archive size={18} className="text-indigo-400" /> Encrypted Vault PRO</h2><button onClick={()=>setVault(v=>[...v])} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold"><RefreshCw size={11} /> Refresh</button></div>
               <p className="text-[12px] leading-relaxed text-slate-400">Stores <b>only encrypted payload</b> + metadata locally. No plaintext, no password, zero backend. Search, load, export, import, wipe — production ready.</p>
@@ -1022,6 +1290,40 @@ export default function App(){
                 <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><Upload size={14} /> Import <input type="file" accept="application/json" className="hidden" onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; try{ const arr=JSON.parse(await f.text()); if(!Array.isArray(arr)) throw Error(); setVault(v=>[...arr,...v].slice(0,60)); toast("Imported","ok") }catch{ toast("Invalid JSON","err") } }} /></label>
                 <button onClick={()=>{ if(confirm("Wipe entire vault? This cannot be undone.")){ setVault([]); toast("Vault wiped","ok") } }} className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2.5 text-[13px] font-bold text-white"><Trash2 size={14} /> Wipe All</button>
               </div>
+
+              {/* CLOUD VAULT SECTION (only if logged in) */}
+              {cloudEnabled && session && (
+                <div className="mt-6 border-t border-white/10 pt-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className={`flex items-center gap-2 text-[14px] font-extrabold ${isLight?"text-cyan-700":"text-cyan-300"}`}><Cloud size={16} /> Cloud Vault — {session.email}</h3>
+                    <button onClick={loadCloudVault} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold ${soft}`}><RefreshCcw size={11} /> Refresh</button>
+                  </div>
+                  <p className={`mb-3 text-[11px] leading-relaxed ${muted}`}>Server par sirf encrypted ciphertext hai — password aapke device par hi hai. {cloudVault.length} items synced.</p>
+                  {cloudVault.length === 0 ? (
+                    <div className={`rounded-xl border border-dashed p-4 text-center text-[12px] ${muted} ${isLight?"border-slate-300":"border-white/10"}`}>
+                      Encrypt any note with "Save vault meta" enabled to sync to cloud.
+                    </div>
+                  ) : (
+                    <div className="max-h-[280px] space-y-2 overflow-auto pr-1">
+                      {cloudVault.map(item=>(
+                        <div key={item.id} className={`flex items-center justify-between gap-2 rounded-xl border p-2.5 ${isLight?"border-slate-200 bg-slate-50":"border-white/10 bg-white/[0.03]"}`}>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-mono text-[11px]">{item.id.slice(0,8)}…</div>
+                            <div className={`text-[10px] ${muted}`}>{new Date(item.updated_at).toLocaleString()} • {item.size_bytes} bytes</div>
+                          </div>
+                          <div className="flex gap-1">
+                            <button onClick={async()=>{
+                              const cipher = await fetchCloudVaultItem(item.id)
+                              if (cipher) { setPendingPayload(cipher); setSelectedFile(null); goToTab("notes"); toast("Loaded from cloud → enter password","info") }
+                            }} className="rounded-full bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:scale-105 transition">Load</button>
+                            <button onClick={()=>{ if(confirm("Delete from cloud permanently?")) deleteCloudVaultItem(item.id) }} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${soft}`}><Trash2 size={10} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className={`rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <h3 className="flex items-center gap-2 text-[14px] font-extrabold"><BarChart3 size={15} className="text-cyan-400" /> Insights</h3>
@@ -1043,7 +1345,7 @@ export default function App(){
         )}
 
         {tab==="suite" && (
-          <div>
+          <div key="suite" className="panel-anim">
             <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[18px] font-extrabold"><Rocket size={19} className="text-indigo-400" /> Security Suite Hub — Bento PRO</h2><span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold">Production Tools</span></div>
             <div className="grid gap-3 md:grid-cols-3">
               {[
@@ -1058,11 +1360,9 @@ export default function App(){
                 {id:"suite", I:FileLock2, t:"Protected PDF", d:"Password-locked QR archive"},
                 {id:"contact", I:Mail, t:"Contact Us", d:"Enterprise, security, support"},
               ].map(c=>(
-                <button key={c.t} onClick={()=>{ if(c.id!=="suite") goToTab(c.id as Tab); else goToTab("notes") }} className={`group text-left rounded-[1.15rem] border p-4 transition-all duration-300 hover:-translate-y-2 hover:border-indigo-500/40 hover:shadow-[0_20px_50px_rgba(99,102,241,0.2)] active:scale-[0.97] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/85 border-slate-200 shadow-sm hover:shadow-lg"}`}>
-                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-indigo-500/25 to-cyan-400/20 text-indigo-300 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"><c.I size={20} /></div>
-                  <div className="mt-3 text-[14px] font-extrabold">{c.t}</div>
-                  <div className="mt-1 text-[12px] leading-snug text-slate-400">{c.d}</div>
-                  <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-300 transition-transform group-hover:translate-x-1">Open <ChevronRight size={12} className="transition-transform group-hover:translate-x-1" /></div>
+                <button key={c.t} onClick={()=>{ if(c.id!=="suite") goToTab(c.id as Tab); else goToTab("notes") }} className={`group text-left rounded-[1.15rem] border p-4 transition-all hover:-translate-y-1 hover:border-indigo-500/40 hover:shadow-[0_16px_40px_rgba(99,102,241,0.15)] ${theme==="dark"?"bg-white/[0.04] border-white/10":"bg-white/80 border-slate-200 shadow-sm"}`}>
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-cyan-400/15 text-indigo-300"><c.I size={19} /></div><div className="mt-3 text-[14px] font-extrabold">{c.t}</div><div className="mt-1 text-[12px] leading-snug text-slate-400">{c.d}</div>
+                  <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-300">Open <ChevronRight size={12} className="transition group-hover:translate-x-0.5" /></div>
                 </button>
               ))}
             </div>
@@ -1074,7 +1374,7 @@ export default function App(){
         )}
 
         {tab==="contact" && (
-          <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <div key="contact" className="grid gap-4 lg:grid-cols-[1fr_1fr] panel-anim">
             <div className={`rounded-[1.25rem] border p-6 ${theme==="dark"?"bg-slate-900/70 border-white/10":"bg-white/90 border-slate-200 shadow-lg"}`}>
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="flex items-center gap-2 text-[18px] font-extrabold"><Mail size={19} className="text-cyan-400" /> Get in Touch — Surakshit Labs</h2>
@@ -1137,24 +1437,24 @@ export default function App(){
         )}
 
         {/* COPYRIGHT FOOTER — PRODUCTION GRADE */}
-        <footer className={`mt-10 rounded-[1.25rem] border p-5 text-center backdrop-blur-xl ${theme==="dark"?"bg-slate-900/40 border-white/10":"bg-white/70 border-slate-200 shadow-sm"}`}>
-          <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-bold tracking-widest text-slate-400 uppercase">
+        <footer className={`mt-10 rounded-[1.25rem] border p-4 sm:p-5 text-center backdrop-blur-xl animate-[fadeUp_0.7s_ease_both] ${card}`}>
+          <div className={`flex flex-wrap items-center justify-center gap-2 text-[10px] sm:text-[11px] font-bold tracking-widest uppercase ${muted}`}>
             <img src={INLINE_ICON_SVG} alt="Surakshit Vault logo" className="h-5 w-5 rounded-md" />
             <span>© 2026 Surakshit Labs Pvt. Ltd.</span><span className="hidden md:inline">•</span><span>Surakshit Vault PRO v{APP_VERSION}</span><span className="hidden md:inline">•</span><span>Made in Bharat 🇮🇳</span>
           </div>
-          <div className="mx-auto mt-3 max-w-3xl text-[12px] leading-relaxed text-slate-400">
-            Military-grade client-side cryptography: <b className="text-slate-200">PBKDF2-HMAC-SHA256 1M iterations + AES-GCM-256 + 16B salt + 12B IV</b> — non-deterministic QR, zero backend, zero tracking, offline-first. <br />
-            <span className="font-mono text-[11px]">No cookies • No analytics • No telemetry • No cloud upload • Keys never leave device • Open-source auditable Web Crypto •</span><br />
-            <span className="mt-2 inline-block rounded-full bg-white/5 px-3 py-1 text-[10px] font-bold tracking-widest">All Rights Reserved — Licensed for production use • Keep HTML + QR + Password safe for 10+ years</span>
+          <div className={`mx-auto mt-3 max-w-3xl text-[11px] sm:text-[12px] leading-relaxed ${muted}`}>
+            Military-grade client-side cryptography: <b className={isLight?"text-slate-800":"text-slate-200"}>PBKDF2-HMAC-SHA256 1M iterations + AES-GCM-256 + 16B salt + 12B IV</b> — non-deterministic QR, zero backend, zero tracking, offline-first. <br />
+            <span className="font-mono text-[10px] sm:text-[11px]">No cookies • No analytics • No telemetry • No cloud upload • Keys never leave device • Open-source auditable Web Crypto •</span><br />
+            <span className={`mt-2 inline-block rounded-full px-3 py-1 text-[10px] font-bold tracking-widest ${isLight?"bg-slate-100 text-slate-700":"bg-white/5"}`}>All Rights Reserved — Licensed for production use • Keep HTML + QR + Password safe for 10+ years</span>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[11px]">
-            <a href="https://surakshit-vault-pro.pages.dev/" target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/15 px-3 py-1 font-bold text-cyan-200 hover:bg-cyan-500/25"><Link2 size={12} /> Live: surakshit-vault-pro.pages.dev</a>
-            <a href="https://github.com/SudhirDevOps1/Surakshit-Vault-PRO" target="_blank" rel="noopener" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10">GitHub Repo</a>
+            <a href="https://surakshit-vault-pro.pages.dev/" target="_blank" rel="noopener" className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-bold transition hover:scale-105 ${isLight?"border-cyan-300 bg-cyan-50 text-cyan-800 hover:bg-cyan-100":"border-cyan-500/30 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25"}`}><Link2 size={12} /> Live: surakshit-vault-pro.pages.dev</a>
+            <a href="https://github.com/SudhirDevOps1/Surakshit-Vault-PRO" target="_blank" rel="noopener" className={`rounded-full border px-3 py-1 font-bold transition hover:scale-105 ${soft}`}>GitHub Repo</a>
           </div>
           <div className="mt-3 flex flex-wrap justify-center gap-2 text-[11px]">
-            <a className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10" href="#" onClick={e=>{e.preventDefault(); setHelpOpen(true)}}>Security Whitepaper</a>
-            <a className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-bold hover:bg-white/10" href="#" onClick={e=>{e.preventDefault(); toast("No data collection — fully offline","info")}}>Privacy Policy: Zero Data</a>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 font-bold text-emerald-300"><ShieldCheck size={12} /> Production Grade • Audited • PWA Ready</span>
+            <a className={`rounded-full border px-3 py-1 font-bold transition hover:scale-105 ${soft}`} href="#" onClick={e=>{e.preventDefault(); setHelpOpen(true)}}>Security Whitepaper</a>
+            <a className={`rounded-full border px-3 py-1 font-bold transition hover:scale-105 ${soft}`} href="#" onClick={e=>{e.preventDefault(); toast("No data collection — fully offline","info")}}>Privacy Policy: Zero Data</a>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-bold ${isLight?"border-emerald-300 bg-emerald-50 text-emerald-700":"border-emerald-500/20 bg-emerald-500/10 text-emerald-300"}`}><ShieldCheck size={12} /> Production Grade • Audited • PWA Ready</span>
           </div>
         </footer>
       </div>
@@ -1193,6 +1493,69 @@ export default function App(){
         </div>
       )}
 
+      {/* AUTH MODAL — Login / Signup for multi-user cloud sync */}
+      {authOpen && (
+        <div className="fixed inset-0 z-[85] grid place-items-center bg-[#020612]/75 p-4 backdrop-blur-[8px] animate-[fadeIn_0.2s_ease_both]" onClick={()=>setAuthOpen(false)}>
+          <div className={`w-[min(440px,100%)] rounded-[1.25rem] border p-5 shadow-2xl ${isLight?"bg-white border-slate-200":"bg-slate-900 border-white/10"}`} onClick={e=>e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[17px] font-extrabold">
+                {authMode==="login" ? <><LogIn size={18} className="text-indigo-500" /> Login to Cloud Vault</> : <><UserPlus size={18} className="text-cyan-500" /> Create Account</>}
+              </h2>
+              <button onClick={()=>{setAuthOpen(false); setAuthError("")}} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${soft}`}><X size={12} /> Close</button>
+            </div>
+
+            <div className={`mb-3 rounded-xl border p-3 text-[11px] leading-relaxed ${isLight?"border-emerald-200 bg-emerald-50 text-emerald-800":"border-emerald-500/20 bg-emerald-500/5 text-emerald-200"}`}>
+              <ShieldCheck size={13} className="inline mr-1" />
+              <b>Zero-Knowledge:</b> Password sirf browser mein rehta hai. Server ko sirf hash milta hai. Password bhoolne par data recover nahi hoga.
+            </div>
+
+            <div className="mb-3 flex rounded-xl border overflow-hidden">
+              <button onClick={()=>setAuthMode("login")} className={`flex-1 py-2 text-[13px] font-bold transition ${authMode==="login" ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white" : soft}`}>Login</button>
+              <button onClick={()=>setAuthMode("signup")} className={`flex-1 py-2 text-[13px] font-bold transition ${authMode==="signup" ? "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white" : soft}`}>Signup</button>
+            </div>
+
+            <label className={`mb-1 block text-[11px] font-bold uppercase tracking-widest ${muted}`}>Email</label>
+            <input type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isLight?"bg-white border-slate-300 text-slate-900":"bg-black/30 border-white/10 text-white"}`} />
+
+            <label className={`mt-3 mb-1 block text-[11px] font-bold uppercase tracking-widest ${muted}`}>Password (min 8 chars)</label>
+            <input type="password" value={authPw} onChange={e=>setAuthPw(e.target.value)} placeholder="strong password" autoComplete={authMode==="login"?"current-password":"new-password"} onKeyDown={e=>{if(e.key==="Enter") authMode==="login" ? handleLogin() : handleSignup()}} className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${isLight?"bg-white border-slate-300 text-slate-900":"bg-black/30 border-white/10 text-white"}`} />
+
+            {authMode==="signup" && authPw && (
+              <div className="mt-2">
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full transition-all" style={{ width:`${strengthScore(authPw).pct}%`, background: strengthScore(authPw).color }} /></div>
+                <div className="mt-1 text-[10px] font-bold" style={{ color: strengthScore(authPw).color }}>Strength: {strengthScore(authPw).label}</div>
+              </div>
+            )}
+
+            {turnstileSiteKey && (
+              <div className={`mt-3 rounded-xl border border-dashed p-2 text-center text-[10px] ${muted}`}>
+                <Shield size={12} className="inline mr-1" /> Turnstile CAPTCHA site key detected. Widget will render here in production.
+                <input type="hidden" value={turnstileToken} onChange={e=>setTurnstileToken(e.target.value)} />
+              </div>
+            )}
+
+            {authError && (
+              <div className={`mt-3 rounded-xl border p-2.5 text-[12px] font-bold ${isLight?"border-red-200 bg-red-50 text-red-700":"border-red-500/30 bg-red-500/10 text-red-300"}`}>
+                <AlertTriangle size={12} className="inline mr-1" /> {authError}
+              </div>
+            )}
+
+            <button onClick={authMode==="login" ? handleLogin : handleSignup} disabled={authBusy} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 py-3 text-[14px] font-extrabold text-white shadow-lg hover:shadow-xl transition disabled:opacity-60">
+              {authBusy ? <Loader2 size={16} className="animate-spin" /> : authMode==="login" ? <LogIn size={15} /> : <UserPlus size={15} />}
+              {authBusy ? (authMode==="login" ? "Verifying…" : "Creating account…") : (authMode==="login" ? "Login" : "Create Account")}
+            </button>
+
+            <div className="mt-3 text-center">
+              <button onClick={()=>setAuthMode(authMode==="login"?"signup":"login")} className={`text-[11px] font-bold underline decoration-dotted ${muted} hover:opacity-80`}>
+                {authMode==="login" ? "Naya user? Signup karo →" : "Already have account? Login →"}
+              </button>
+            </div>
+
+            <p className={`mt-3 text-center text-[10px] tracking-widest uppercase font-bold ${muted}`}>PBKDF2 200K • Client-Side Hash • Zero-Knowledge</p>
+          </div>
+        </div>
+      )}
+
       {keypadOpen && (
         <div className="fixed inset-0 z-[85] grid place-items-center bg-[#020612]/75 p-4 backdrop-blur-[8px]" onClick={()=>setKeypadOpen(false)}>
           <div className={`w-[min(520px,100%)] rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-slate-900 border-white/10":"bg-white border-slate-200"}`} onClick={e=>e.stopPropagation()}>
@@ -1209,19 +1572,55 @@ export default function App(){
       )}
 
       <style>{`
-        @keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:none}}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-        @keyframes bounceIn{0%{transform:scale(0);opacity:0}50%{transform:scale(1.25)}100%{transform:scale(1);opacity:1}}
-        @keyframes panelSlide{from{opacity:0;transform:translateY(16px) scale(0.98);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
-        @keyframes glow{0%,100%{box-shadow:0 0 12px rgba(99,102,241,0.3)}50%{box-shadow:0 0 28px rgba(34,211,238,0.45)}}
-        @keyframes float{0%,100%{transform:translateY(0px)}50%{transform:translateY(-6px)}}
-        .scrollbar-none::-webkit-scrollbar{display:none} .scrollbar-none{scrollbar-width:none}
-        .animate-panel{animation:panelSlide 0.4s cubic-bezier(0.22,1,0.36,1) both}
-        .animate-glow{animation:glow 3s ease-in-out infinite}
-        .animate-float{animation:float 6s ease-in-out infinite}
-        /* Smooth transitions for all interactive elements */
-        button,a,input,textarea,select{transition:all 0.2s cubic-bezier(0.22,1,0.36,1)}
-      `}</style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+@keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes panelIn{from{opacity:0;transform:translateY(14px) scale(0.985);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+@keyframes pop{0%{transform:scale(0.6)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
+@keyframes floatOrb{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(30px,-40px,0) scale(1.15)}}
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 18px rgba(99,102,241,0.35)}50%{box-shadow:0 0 36px rgba(34,211,238,0.45)}}
+@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.scrollbar-none::-webkit-scrollbar{display:none}
+.scrollbar-none{scrollbar-width:none}
+.btn-soft{background:rgba(255,255,255,0.08);color:#e2e8f0;border-color:rgba(255,255,255,0.12)}
+.btn-soft:hover{background:rgba(255,255,255,0.14)}
+[data-theme="light"] .btn-soft{background:#f1f5f9;color:#0f172a;border-color:#cbd5e1}
+[data-theme="light"] .btn-soft:hover{background:#e2e8f0}
+/* Light mode visibility overrides for legacy hard-coded dark classes */
+[data-theme="light"] .sv-app .text-slate-300{color:#334155!important}
+[data-theme="light"] .sv-app .text-slate-400{color:#475569!important}
+[data-theme="light"] .sv-app .text-slate-500{color:#64748b!important}
+[data-theme="light"] .sv-app .text-indigo-200{color:#4338ca!important}
+[data-theme="light"] .sv-app .text-indigo-300{color:#4f46e5!important}
+[data-theme="light"] .sv-app .text-cyan-200{color:#0e7490!important}
+[data-theme="light"] .sv-app .text-cyan-300{color:#0891b2!important}
+[data-theme="light"] .sv-app .text-emerald-200{color:#047857!important}
+[data-theme="light"] .sv-app .text-emerald-300{color:#059669!important}
+[data-theme="light"] .sv-app .text-violet-200{color:#6d28d9!important}
+[data-theme="light"] .sv-app .text-amber-200{color:#b45309!important}
+[data-theme="light"] .sv-app .text-red-200{color:#b91c1c!important}
+[data-theme="light"] .sv-app .text-red-300{color:#dc2626!important}
+[data-theme="light"] .sv-app .text-sky-200{color:#0369a1!important}
+[data-theme="light"] .sv-app .bg-white\\/10,[data-theme="light"] .sv-app .bg-white\\/\\[0\\.05\\],[data-theme="light"] .sv-app .bg-white\\/\\[0\\.04\\],[data-theme="light"] .sv-app .bg-white\\/\\[0\\.03\\],[data-theme="light"] .sv-app .bg-white\\/\\[0\\.06\\]{background-color:#f1f5f9!important}
+[data-theme="light"] .sv-app .bg-black\\/20,[data-theme="light"] .sv-app .bg-black\\/30,[data-theme="light"] .sv-app .bg-black\\/40{background-color:#f8fafc!important}
+[data-theme="light"] .sv-app .border-white\\/10{border-color:#e2e8f0!important}
+[data-theme="light"] .sv-app .bg-\\[\\#070c18\\]\\/80{background-color:#ffffff!important}
+[data-theme="light"] .sv-app .bg-\\[\\#05070f\\]{background-color:#f8fafc!important}
+[data-theme="light"] .sv-app input,[data-theme="light"] .sv-app textarea,[data-theme="light"] .sv-app select{color:#0f172a!important}
+[data-theme="light"] .sv-app .text-white{color:#0f172a!important}
+[data-theme="light"] .sv-app button.bg-gradient-to-r .text-white,[data-theme="light"] .sv-app .bg-gradient-to-r{color:#fff!important}
+[data-theme="light"] .sv-app .bg-emerald-600,[data-theme="light"] .sv-app .bg-indigo-600,[data-theme="light"] .sv-app .bg-red-600{color:#fff!important}
+[data-theme="light"] .sv-app .bg-emerald-600 *,[data-theme="light"] .sv-app a.bg-emerald-600{color:#fff!important}
+[data-theme="light"] .sv-app .from-indigo-600{--tw-gradient-from:#4f46e5}
+/* Panel enter animation */
+.sv-app section,[data-theme] .panel-anim{animation:panelIn 0.4s cubic-bezier(0.22,1,0.36,1) both}
+/* Responsive touch targets */
+@media (max-width:640px){
+  .sv-app button,.sv-app a{min-height:36px}
+  .sv-app input,.sv-app textarea,.sv-app select{font-size:16px!important}
+}
+`}</style>
     </div>
   )
 }
