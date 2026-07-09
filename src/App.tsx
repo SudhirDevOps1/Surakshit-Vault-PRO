@@ -73,7 +73,80 @@ const randomBytes = (n: number) => { const b = new Uint8Array(n); crypto.getRand
 const toHex = (b: Uint8Array) => Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join("")
 const toB64Url = (b: Uint8Array) => bytesToBase64(b).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")
 
+/* ============== SECURITY VALIDATORS ============== */
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB for QR image
+const MAX_VAULT_IMPORT_SIZE = 1 * 1024 * 1024 // 1 MB for vault JSON
+const MAX_PAYLOAD_B64_LEN = 5000 // Prevent DoS via huge payloads
+const MAX_CIPHERTEXT_SIZE = 1024 * 1024 // 1 MB for cloud ciphertext
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isValidWorkerUrl(url: string): boolean {
+  if (!url || typeof url !== "string") return false
+  if (url.length > 300) return false
+  try {
+    const u = new URL(url.trim())
+    // Allow https always, http only for localhost/dev
+    if (u.protocol !== "https:" && !(u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname.endsWith(".local")))) return false
+    if (["javascript:", "data:", "file:", "ftp:"].includes(u.protocol)) return false
+    if (u.username || u.password) return false // No credentials in URL
+    // Basic sanity: must have a dot or be localhost
+    if (!u.hostname.includes(".") && u.hostname !== "localhost") return false
+    return true
+  } catch { return false }
+}
+function isValidEmail(email: string): boolean {
+  if (!email || typeof email !== "string") return false
+  if (email.length < 5 || email.length > 254) return false
+  return EMAIL_REGEX.test(email.trim())
+}
+function isUUID(str: string): boolean {
+  if (!str || typeof str !== "string") return false
+  return UUID_REGEX.test(str.trim())
+}
+function decodeJwtPayloadUnsafe(jwtStr: string): any | null {
+  try {
+    const parts = jwtStr.split(".")
+    if (parts.length !== 3) return null
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/")
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4)
+    return JSON.parse(atob(padded))
+  } catch { return null }
+}
+function isJwtExpired(jwtStr: string): boolean {
+  const payload = decodeJwtPayloadUnsafe(jwtStr)
+  if (!payload || typeof payload.exp !== "number") return false // If no exp, don't treat as expired (let server decide)
+  return Date.now() >= payload.exp * 1000
+}
+function safeParseVaultImport(text: string): VaultItem[] | null {
+  try {
+    if (text.length > MAX_VAULT_IMPORT_SIZE) return null
+    const data = JSON.parse(text)
+    if (!Array.isArray(data)) return null
+    if (data.length > 100) return null // Limit count
+    // Validate each item
+    const out: VaultItem[] = []
+    for (const item of data) {
+      if (!item || typeof item !== "object") continue
+      if (typeof item.id !== "string" || typeof item.payload !== "string") continue
+      if (item.id.length > 200 || item.payload.length > MAX_CIPHERTEXT_SIZE) continue
+      // Optional fields with safe defaults
+      out.push({
+        id: String(item.id).slice(0, 200),
+        title: typeof item.title === "string" ? String(item.title).slice(0, 100) : "Imported",
+        payload: String(item.payload),
+        createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+        ttl: typeof item.ttl === "number" ? Math.min(365, Math.max(0, item.ttl)) : 0,
+      })
+      if (out.length >= 60) break
+    }
+    return out
+  } catch { return null }
+}
+
 async function deriveKey(pw: string, salt: Uint8Array) {
+  if (!pw || typeof pw !== "string" || pw.length > 1024 || pw.length < 1) throw new Error("Invalid password length")
+  if (!salt || salt.length < 8 || salt.length > 64) throw new Error("Invalid salt")
   const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"])
   return crypto.subtle.deriveKey({ name:"PBKDF2", salt: salt as any, iterations: PBKDF2_ITER, hash:"SHA-256" }, km, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"])
 }
@@ -108,8 +181,12 @@ async function decryptEntry(ent: any, pw: string) {
   return new TextDecoder().decode(pt)
 }
 async function decryptPayload(payloadB64: string, pw: string) {
+  if (!payloadB64 || typeof payloadB64 !== "string") throw new Error("INVALID")
+  if (payloadB64.length > MAX_PAYLOAD_B64_LEN) { console.error("Payload too large:", payloadB64.length); throw new Error("INVALID") }
+  if (!pw || typeof pw !== "string" || pw.length > 1024) throw new Error("INVALID")
   let obj:any
   const cleaned = payloadB64.trim().replace(/\s+/g,"")
+  if (cleaned.length > MAX_PAYLOAD_B64_LEN) throw new Error("INVALID")
   try { obj = JSON.parse(b64ToStr(cleaned)) } catch(e){
     console.error("Failed to parse payload as base64-JSON:", e, "payload starts with:", cleaned.slice(0,50))
     throw new Error("INVALID")
@@ -327,53 +404,96 @@ export default function App(){
   const [cloudVault, setCloudVault] = useState<Array<{id:string;size_bytes:number;created_at:number;updated_at:number}>>([])
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator!=="undefined"?navigator.onLine:true)
 
-  // Derive auth hash from password (client-side, never sends raw password)
+  // Derive auth hash from password (client-side, never sends raw password) + hardened validation
   async function deriveAuthHash(password: string, saltB64: string, iterations = AUTH_PBKDF2_ITER): Promise<string> {
-    const salt = base64ToBytes(saltB64)
+    if (!saltB64 || saltB64.length > 100) throw new Error("Invalid salt")
+    let salt: Uint8Array
+    try { salt = base64ToBytes(saltB64) } catch { throw new Error("Invalid salt encoding") }
+    if (salt.length < 8 || salt.length > 64) throw new Error("Invalid salt length")
+    if (!password || password.length < 1 || password.length > 1024) throw new Error("Invalid password length")
     const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"])
     const bits = await crypto.subtle.deriveBits({ name:"PBKDF2", salt: salt as any, iterations, hash:"SHA-256" }, km, 256)
     return bytesToBase64(new Uint8Array(bits))
   }
 
-  // Restore session on load
+  // Restore session on load + JWT expiry check
   useEffect(()=>{
     try {
       const s = JSON.parse(localStorage.getItem(AUTH_KEY) || "null")
-      if (s?.jwt && s?.user_id) setSession(s)
-    } catch {}
+      if (s?.jwt && s?.user_id) {
+        if (isJwtExpired(s.jwt)) {
+          console.warn("Stored JWT expired, clearing session")
+          localStorage.removeItem(AUTH_KEY)
+        } else {
+          // Validate JWT structure
+          const p = decodeJwtPayloadUnsafe(s.jwt)
+          if (p && p.sub) setSession(s)
+          else localStorage.removeItem(AUTH_KEY)
+        }
+      }
+    } catch {
+      try { localStorage.removeItem(AUTH_KEY) } catch {}
+    }
     const on = ()=>setIsOnline(true), off = ()=>setIsOnline(false)
     window.addEventListener("online", on); window.addEventListener("offline", off)
     return ()=>{ window.removeEventListener("online", on); window.removeEventListener("offline", off) }
   },[])
   useEffect(()=>{
-    if (session) localStorage.setItem(AUTH_KEY, JSON.stringify(session))
-    else localStorage.removeItem(AUTH_KEY)
+    try {
+      if (session) {
+        if (isJwtExpired(session.jwt)) {
+          setSession(null)
+          return
+        }
+        localStorage.setItem(AUTH_KEY, JSON.stringify(session))
+      }
+      else localStorage.removeItem(AUTH_KEY)
+    } catch (e) {
+      console.warn("localStorage quota or error:", e)
+    }
   },[session])
 
-  // Fetch Turnstile site key from backend (if configured)
+  // Fetch Turnstile site key from backend (if configured) — validated
   useEffect(()=>{
     if (!cloudEnabled || !workerUrl) return
-    fetch(`${workerUrl.replace(/\/$/,"")}/`).then(r=>r.json()).then((d:any)=>{
-      if (d?.turnstile_site_key) setTurnstileSiteKey(d.turnstile_site_key)
+    if (!isValidWorkerUrl(workerUrl)) return
+    const ctrl = new AbortController()
+    fetch(`${workerUrl.replace(/\/$/,"")}/`, { signal: ctrl.signal }).then(r=>{
+      if (!r.ok) throw new Error("Fetch failed")
+      return r.json()
+    }).then((d:any)=>{
+      if (d?.turnstile_site_key && typeof d.turnstile_site_key === "string" && d.turnstile_site_key.length < 200) {
+        setTurnstileSiteKey(d.turnstile_site_key)
+      }
     }).catch(()=>{})
+    return ()=> ctrl.abort()
   },[cloudEnabled, workerUrl])
 
-  // Signup
+  // Signup — hardened with validation
   async function handleSignup(){
-    if (!authEmail.trim() || !authPw) { setAuthError("Email + password required"); return }
-    if (authPw.length < 8) { setAuthError("Password min 8 chars"); return }
+    const emailTrim = authEmail.trim().toLowerCase()
+    if (!emailTrim || !authPw) { setAuthError("Email + password required"); return }
+    if (!isValidEmail(emailTrim)) { setAuthError("Invalid email format"); return }
+    if (authPw.length < 8 || authPw.length > 128) { setAuthError("Password must be 8-128 chars"); return }
     if (!workerUrl) { setAuthError("Backend URL required in Settings"); return }
+    if (!isValidWorkerUrl(workerUrl)) { setAuthError("Invalid Worker URL — must be https://..."); return }
+    // Turnstile required in production (if site key configured)
+    const isLocalhost = location.hostname === "localhost" || location.hostname === "127.0.0.1"
+    if (turnstileSiteKey && !isLocalhost && (!turnstileToken || turnstileToken.length < 10)) {
+      setAuthError("CAPTCHA required — please complete Turnstile"); return
+    }
     setAuthBusy(true); setAuthError("")
     try {
-      // Generate salt client-side
       const salt = bytesToBase64(randomBytes(16))
       const authHash = await deriveAuthHash(authPw, salt)
       const res = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/signup`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), salt, authHash, turnstile: turnstileToken || "dev" })
+        body: JSON.stringify({ email: emailTrim, salt, authHash, turnstile: turnstileToken || (isLocalhost ? "dev" : "") })
       })
       const data = await res.json() as any
       if (!res.ok) throw new Error(data.error || "Signup failed")
+      if (!data.jwt || !data.user_id) throw new Error("Invalid server response")
+      if (isJwtExpired(data.jwt)) throw new Error("Server returned expired token")
       setSession({ jwt: data.jwt, user_id: data.user_id, email: data.email })
       setAuthOpen(false); setAuthEmail(""); setAuthPw(""); setTurnstileToken("")
       toast("🎉 Account created! Cloud sync active.","ok"); celebrate(undefined, undefined, 90)
@@ -381,25 +501,32 @@ export default function App(){
     finally { setAuthBusy(false) }
   }
 
-  // Login
+  // Login — hardened
   async function handleLogin(){
-    if (!authEmail.trim() || !authPw) { setAuthError("Email + password required"); return }
+    const emailTrim = authEmail.trim().toLowerCase()
+    if (!emailTrim || !authPw) { setAuthError("Email + password required"); return }
+    if (!isValidEmail(emailTrim)) { setAuthError("Invalid email format"); return }
     if (!workerUrl) { setAuthError("Backend URL required in Settings"); return }
+    if (!isValidWorkerUrl(workerUrl)) { setAuthError("Invalid Worker URL — must be https://..."); return }
+    const isLocalhost = location.hostname === "localhost" || location.hostname === "127.0.0.1"
+    if (turnstileSiteKey && !isLocalhost && (!turnstileToken || turnstileToken.length < 10)) {
+      setAuthError("CAPTCHA required"); return
+    }
     setAuthBusy(true); setAuthError("")
     try {
-      // 1. Get salt for this email
-      const saltRes = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/salt?email=${encodeURIComponent(authEmail.trim().toLowerCase())}`)
+      const saltRes = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/salt?email=${encodeURIComponent(emailTrim)}`)
       const saltData = await saltRes.json() as any
       if (!saltRes.ok || !saltData.salt) throw new Error("Cannot fetch salt")
-      // 2. Derive auth hash locally
+      if (typeof saltData.salt !== "string" || saltData.salt.length > 100) throw new Error("Invalid salt from server")
       const authHash = await deriveAuthHash(authPw, saltData.salt)
-      // 3. Login
       const res = await fetch(`${workerUrl.replace(/\/$/,"")}/auth/login`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), authHash, turnstile: turnstileToken || "dev" })
+        body: JSON.stringify({ email: emailTrim, authHash, turnstile: turnstileToken || (isLocalhost ? "dev" : "") })
       })
       const data = await res.json() as any
       if (!res.ok) throw new Error(data.error || "Login failed")
+      if (!data.jwt) throw new Error("Invalid server response")
+      if (isJwtExpired(data.jwt)) throw new Error("Server returned expired token")
       setSession({ jwt: data.jwt, user_id: data.user_id, email: data.email })
       setAuthOpen(false); setAuthEmail(""); setAuthPw(""); setTurnstileToken("")
       toast("✅ Logged in successfully","ok"); celebrate(undefined, undefined, 70)
@@ -419,10 +546,15 @@ export default function App(){
     setSession(null); setCloudVault([]); toast("Logged out","info")
   }
 
-  // Sync encrypted note to cloud (uses user session, not raw secret)
+  // Sync encrypted note to cloud — hardened
   const syncToCloud = async (id: string, _t: string, p: string) => {
     if (!cloudEnabled || !workerUrl) return
+    if (!isValidWorkerUrl(workerUrl)) { toast("Invalid Worker URL","err"); return }
     if (!session?.jwt) { toast("Login required for cloud sync","err"); return }
+    if (isJwtExpired(session.jwt)) { setSession(null); toast("Session expired, login again","err"); return }
+    if (!isUUID(id)) { toast("Invalid note ID (must be UUID)","err"); return }
+    if (!p || typeof p !== "string" || p.length > MAX_CIPHERTEXT_SIZE) { toast("Ciphertext too large","err"); return }
+    if (p.length < 10) { toast("Ciphertext too small","err"); return }
     setSyncStatus("syncing")
     try {
       const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/sync`, {
@@ -432,6 +564,7 @@ export default function App(){
       })
       const data = await res.json() as any
       if (!res.ok) throw new Error(data.error || "Sync failed")
+      if (data.size && data.size > MAX_CIPHERTEXT_SIZE) throw new Error("Server returned too large size")
       setSyncStatus("done")
       toast(`☁️ Synced to cloud (${data.size} bytes)`, "ok")
       setTimeout(() => setSyncStatus("idle"), 3000)
@@ -440,7 +573,7 @@ export default function App(){
       console.error("Sync Error:", e)
       setSyncStatus("error")
       toast(`❌ Sync failed: ${e.message}`, "err")
-      if (e.message?.includes("Invalid token") || e.message?.includes("revoked")) {
+      if (e.message?.includes("Invalid token") || e.message?.includes("revoked") || e.message?.includes("expired")) {
         setSession(null)
       }
     }
@@ -448,35 +581,56 @@ export default function App(){
 
   async function loadCloudVault(){
     if (!session?.jwt || !workerUrl) return
+    if (!isValidWorkerUrl(workerUrl)) return
+    if (isJwtExpired(session.jwt)) { setSession(null); return }
     try {
       const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/list`, {
         headers: { "Authorization": `Bearer ${session.jwt}` }
       })
+      if (!res.ok) {
+        if (res.status === 401) { setSession(null); toast("Session expired","err") }
+        return
+      }
       const data = await res.json() as any
-      if (res.ok && data.items) setCloudVault(data.items)
+      if (data.items && Array.isArray(data.items)) {
+        // Validate items structure
+        const safe = data.items.filter((it:any)=> it && typeof it.id === "string" && isUUID(it.id)).slice(0,100)
+        setCloudVault(safe)
+      }
     } catch {}
   }
   useEffect(()=>{ if (session && cloudEnabled) loadCloudVault() },[session, cloudEnabled])
 
   async function fetchCloudVaultItem(id: string): Promise<string | null> {
     if (!session?.jwt || !workerUrl) return null
+    if (!isValidWorkerUrl(workerUrl)) return null
+    if (isJwtExpired(session.jwt)) { setSession(null); return null }
+    if (!isUUID(id)) { toast("Invalid vault ID","err"); return null }
     try {
       const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/${id}`, {
         headers: { "Authorization": `Bearer ${session.jwt}` }
       })
+      if (!res.ok) {
+        if (res.status === 401) setSession(null)
+        return null
+      }
       const data = await res.json() as any
-      if (res.ok && data.ciphertext) return data.ciphertext
+      if (data.ciphertext && typeof data.ciphertext === "string" && data.ciphertext.length <= MAX_CIPHERTEXT_SIZE) return data.ciphertext
     } catch {}
     return null
   }
 
   async function deleteCloudVaultItem(id: string){
     if (!session?.jwt || !workerUrl) return
+    if (!isValidWorkerUrl(workerUrl)) return
+    if (isJwtExpired(session.jwt)) { setSession(null); return }
+    if (!isUUID(id)) { toast("Invalid ID","err"); return }
     try {
-      await fetch(`${workerUrl.replace(/\/$/, "")}/vault/${id}`, {
+      const res = await fetch(`${workerUrl.replace(/\/$/, "")}/vault/${id}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${session.jwt}` }
       })
+      if (!res.ok && res.status === 401) { setSession(null); return }
       toast("Deleted from cloud","ok")
       loadCloudVault()
     } catch { toast("Delete failed","err") }
@@ -548,6 +702,9 @@ export default function App(){
   async function submitContact(e: React.FormEvent){
     e.preventDefault()
     if(!contactEmail.trim() || !contactMsg.trim()){ toast("Fill email and message","err"); return }
+    if(!isValidEmail(contactEmail.trim())){ toast("Invalid email format","err"); return }
+    if(contactMsg.trim().length < 10){ toast("Message too short (min 10 chars)","err"); return }
+    if(contactMsg.trim().length > 5000){ toast("Message too long (max 5000)","err"); return }
     setContactSending(true)
     try{
       const form = new FormData()
@@ -583,7 +740,7 @@ export default function App(){
   const [settingsOpen,setSettingsOpen]=useState(false)
 
   // EFFECTS
-  useEffect(()=>{ localStorage.setItem(VAULT_KEY, JSON.stringify(vault)) },[vault])
+  useEffect(()=>{ try{ localStorage.setItem(VAULT_KEY, JSON.stringify(vault)) }catch(e){ console.warn("localStorage quota exceeded for vault", e); toast("Local vault storage full — export & clear some items","err") } },[vault])
   useEffect(()=>{
     const handler = (e: KeyboardEvent)=>{
       if(e.key==="Escape"){ setHelpOpen(false); setKeypadOpen(false); setSettingsOpen(false); stopCam() }
@@ -653,11 +810,15 @@ export default function App(){
   // ENCRYPT
   async function handleEncrypt(){
     if(!plain.trim()){ setEncStatus({type:"err",msg:"❌ कृपया नोट लिखें"}); return }
+    if(plain.trim().length > 2000){ setEncStatus({type:"err",msg:"❌ Text exceeds 2000 char limit"}); return }
     if(!encPw){ setEncStatus({type:"err",msg:"❌ पासवर्ड आवश्यक"}); return }
+    if(encPw.length > 1024){ setEncStatus({type:"err",msg:"❌ Password too long (max 1024)"}); return }
+    if(title.length > 100){ setEncStatus({type:"err",msg:"❌ Title too long"}); return }
     if(deniable && !decoyText.trim()){ setEncStatus({type:"err",msg:"❌ Decoy data required"}); return }
+    if(deniable && decoyText.length > 900){ setEncStatus({type:"err",msg:"❌ Decoy too large"}); return }
     if(deniable && !decoyPw){ setEncStatus({type:"err",msg:"❌ Decoy password required"}); return }
+    if(deniable && decoyPw.length > 1024){ setEncStatus({type:"err",msg:"❌ Decoy password too long"}); return }
     if(deniable && decoyPw===encPw){ setEncStatus({type:"err",msg:"❌ Real/Decoy keys must differ"}); return }
-    // With ErrorCorrection M, QR v40 max ~2331 bytes. Deniable doubles the payload.
     const maxChars = deniable ? 900 : 2000
     if(plain.length>maxChars){ setEncStatus({type:"err",msg:`❌ Text too large. Max ${maxChars} chars (${deniable?"deniable":"normal"} mode)`}); return }
     setEncBusy(true); setEncProgress(10); setEncStatus(null); setQrDataUrl(""); setPayload("")
@@ -692,6 +853,7 @@ export default function App(){
 
   async function handleDecrypt(override?:string){
     if(!decPw){ setDecStatus({type:"err",msg:"❌ Password required"}); return }
+    if(decPw.length > 1024){ setDecStatus({type:"err",msg:"❌ Password too long"}); return }
     setDecBusy(true); setDecProgress(20); setDecStatus(null)
     try{
       let data = override || pendingPayload
@@ -862,26 +1024,38 @@ export default function App(){
 
   const encStrength = strengthScore(encPw)
   const pwStrength = strengthScore(pwOut.includes("•") ? "" : pwOut)
-  const filteredVault = vault.filter(v=>!vaultSearch || v.title.toLowerCase().includes(vaultSearch.toLowerCase()) || v.payload.includes(vaultSearch))
+  const safeSearch = vaultSearch.slice(0,100) // Prevent DoS via huge search string
+  const filteredVault = vault.filter(v=>!safeSearch || v.title.toLowerCase().includes(safeSearch.toLowerCase()) || (safeSearch.length <= 50 && v.payload.includes(safeSearch)))
 
-  // persist settings including cloud sync
+  // persist settings including cloud sync — hardened
   useEffect(()=>{ 
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ 
-      saveVault, showPayload, burn, clipClear, 
-      cloudEnabled, workerUrl, workerSecret 
-    })) 
+    try {
+      // Validate workerUrl before persisting
+      if (workerUrl && !isValidWorkerUrl(workerUrl)) {
+        console.warn("Invalid workerUrl, not persisting:", workerUrl)
+        return
+      }
+      if (workerSecret && workerSecret.length > 500) return // Prevent huge secrets in localStorage (DoS)
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ 
+        saveVault, showPayload, burn, clipClear, 
+        cloudEnabled, workerUrl, workerSecret 
+      }))
+    } catch(e) { console.warn("Settings persist failed:", e) }
   },[saveVault, showPayload, burn, clipClear, cloudEnabled, workerUrl, workerSecret])
 
   useEffect(()=>{ 
     try{ 
       const s = JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}"); 
-      if(typeof s.saveVault!=="undefined") setSaveVault(s.saveVault);
-      if(typeof s.showPayload!=="undefined") setShowPayload(s.showPayload);
-      if(typeof s.burn!=="undefined") setBurn(s.burn);
-      if(typeof s.clipClear!=="undefined") setClipClear(s.clipClear);
-      if(typeof s.cloudEnabled!=="undefined") setCloudEnabled(s.cloudEnabled);
-      if(typeof s.workerUrl!=="undefined") setWorkerUrl(s.workerUrl);
-      if(typeof s.workerSecret!=="undefined") setWorkerSecret(s.workerSecret);
+      if(typeof s.saveVault!=="undefined") setSaveVault(!!s.saveVault);
+      if(typeof s.showPayload!=="undefined") setShowPayload(!!s.showPayload);
+      if(typeof s.burn!=="undefined") setBurn(!!s.burn);
+      if(typeof s.clipClear!=="undefined") setClipClear(!!s.clipClear);
+      if(typeof s.cloudEnabled!=="undefined") setCloudEnabled(!!s.cloudEnabled);
+      if(typeof s.workerUrl==="string" && s.workerUrl.length <= 300) {
+        if (s.workerUrl === "" || isValidWorkerUrl(s.workerUrl)) setWorkerUrl(s.workerUrl)
+        else console.warn("Stored workerUrl invalid, ignoring")
+      }
+      if(typeof s.workerSecret==="string" && s.workerSecret.length <= 500) setWorkerSecret(s.workerSecret);
     }catch{} 
   },[])
 
@@ -1078,8 +1252,8 @@ export default function App(){
             <div className={`rounded-[1.25rem] border p-5 backdrop-blur-xl ${theme==="dark"?"bg-white/[0.05] border-white/10":"bg-white/80 border-slate-200 shadow-lg"}`}>
               <div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><Unlock size={18} className="text-cyan-400" /> डिक्रिप्ट → Text</h2><span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-cyan-200">jsQR + WebCrypto</span></div>
 
-              <div onClick={()=>fileInputRef.current?.click()} onDragOver={e=>{e.preventDefault(); (e.currentTarget as any).classList.add("!border-indigo-500")}} onDragLeave={e=>{ (e.currentTarget as any).classList.remove("!border-indigo-500")}} onDrop={e=>{ e.preventDefault(); const f=e.dataTransfer.files?.[0]; if(f){ setSelectedFile(f); setPendingPayload(""); toast("Image dropped","ok") } }} className="group flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/20 bg-[#070c18]/60 px-4 py-8 text-center transition hover:border-indigo-500/60 hover:bg-indigo-500/5">
-                <QrCode size={28} className="text-indigo-400" /><div className="mt-1 font-bold">Drop QR image here</div><div className="text-[12px] text-slate-400">or click • PNG/JPG/WebP</div><input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f){ setSelectedFile(f); setPendingPayload(""); toast("Image selected","ok") } }} />
+              <div onClick={()=>fileInputRef.current?.click()} onDragOver={e=>{e.preventDefault(); (e.currentTarget as any).classList.add("!border-indigo-500")}} onDragLeave={e=>{ (e.currentTarget as any).classList.remove("!border-indigo-500")}} onDrop={e=>{ e.preventDefault(); const f=e.dataTransfer.files?.[0]; if(!f) return; if(f.size > MAX_FILE_SIZE){ toast(`Image too large — max ${MAX_FILE_SIZE/1024/1024}MB`,"err"); return } if(!f.type.startsWith("image/")){ toast("Only image files allowed","err"); return } setSelectedFile(f); setPendingPayload(""); toast("Image dropped ✓","ok") }} className="group flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/20 bg-[#070c18]/60 px-4 py-8 text-center transition hover:border-indigo-500/60 hover:bg-indigo-500/5">
+                <QrCode size={28} className="text-indigo-400" /><div className="mt-1 font-bold">Drop QR image here</div><div className="text-[12px] text-slate-400">or click • PNG/JPG/WebP • max 10MB</div><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/jpg" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; if(f.size > MAX_FILE_SIZE){ toast(`Image too large — max ${MAX_FILE_SIZE/1024/1024}MB`,"err"); e.target.value=""; return } if(!f.type.startsWith("image/")){ toast("Only image files allowed","err"); e.target.value=""; return } setSelectedFile(f); setPendingPayload(""); toast("Image selected ✓","ok") }} />
               </div>
               <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400"><span>फ़ाइल: {selectedFile?.name || pendingPayload ? (pendingPayload ? "Camera/Pasted ✓" : selectedFile?.name) : "कोई चयन नहीं"}</span><CopyBtn small text={pendingPayload} label="Paste?" /></div>
 
@@ -1287,7 +1461,7 @@ export default function App(){
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button onClick={()=>{ const blob=new Blob([JSON.stringify(vault,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`vault-${Date.now()}.json`; a.click(); toast("Exported","ok") }} className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><FolderDown size={14} /> Export JSON</button>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><Upload size={14} /> Import <input type="file" accept="application/json" className="hidden" onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; try{ const arr=JSON.parse(await f.text()); if(!Array.isArray(arr)) throw Error(); setVault(v=>[...arr,...v].slice(0,60)); toast("Imported","ok") }catch{ toast("Invalid JSON","err") } }} /></label>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-bold"><Upload size={14} /> Import <input type="file" accept="application/json" className="hidden" onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; if(f.size > MAX_VAULT_IMPORT_SIZE){ toast("Import file too large (max 1MB)","err"); e.target.value=""; return } try{ const text = await f.text(); const parsed = safeParseVaultImport(text); if(!parsed){ throw new Error("Invalid format") } setVault(v=>[...parsed,...v].slice(0,60)); toast(`Imported ${parsed.length} items`,"ok") }catch(err:any){ toast("Invalid JSON: "+(err.message||"error"),"err") } finally { e.target.value="" } }} /></label>
                 <button onClick={()=>{ if(confirm("Wipe entire vault? This cannot be undone.")){ setVault([]); toast("Vault wiped","ok") } }} className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2.5 text-[13px] font-bold text-white"><Trash2 size={14} /> Wipe All</button>
               </div>
 
@@ -1479,16 +1653,51 @@ export default function App(){
 
       {settingsOpen && (
         <div className="fixed inset-0 z-[80] grid place-items-center bg-[#020612]/70 p-4 backdrop-blur-[8px]" onClick={()=>setSettingsOpen(false)}>
-          <div className={`w-[min(520px,100%)] rounded-[1.25rem] border p-5 ${theme==="dark"?"bg-slate-900 border-white/10":"bg-white border-slate-200"}`} onClick={e=>e.stopPropagation()}>
-            <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-[16px] font-extrabold"><SettingsIcon size={17} className="text-indigo-400" /> Production Settings</h2><button onClick={()=>setSettingsOpen(false)} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-[12px] font-bold"><X size={13} /> Close</button></div>
+          <div className={`w-[min(540px,100%)] rounded-[1.25rem] border p-5 max-h-[90vh] overflow-y-auto shadow-2xl ${isLight?"bg-white border-slate-200":"bg-slate-900 border-white/10"}`} onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-[17px] font-extrabold"><SettingsIcon size={17} className="text-indigo-500" /> Production Settings</h2><button onClick={()=>setSettingsOpen(false)} className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12px] font-bold ${soft}`}><X size={13} /> Close</button></div>
+            
             <div className="mt-4 space-y-3 text-[13px] font-bold">
               <label className="flex items-center justify-between"><span>Save vault metadata on encrypt</span><input type="checkbox" checked={saveVault} onChange={e=>setSaveVault(e.target.checked)} className="accent-indigo-500 h-5 w-5" /></label>
               <label className="flex items-center justify-between"><span>Show Base64 payload preview</span><input type="checkbox" checked={showPayload} onChange={e=>setShowPayload(e.target.checked)} className="accent-indigo-500 h-5 w-5" /></label>
               <label className="flex items-center justify-between"><span>Burn After Reading (10s)</span><input type="checkbox" checked={burn} onChange={e=>setBurn(e.target.checked)} className="accent-indigo-500 h-5 w-5" /></label>
               <label className="flex items-center justify-between"><span>Clipboard auto-clear (15s)</span><input type="checkbox" checked={clipClear} onChange={e=>setClipClear(e.target.checked)} className="accent-indigo-500 h-5 w-5" /></label>
             </div>
-            <button onClick={()=>{ localStorage.clear(); location.reload() }} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-[13px] font-extrabold text-white"><Trash2 size={15} /> Factory Reset (wipe all)</button>
-            <p className="mt-3 text-center text-[11px] text-slate-400">Settings saved locally — no cloud sync. © 2026 Surakshit Labs</p>
+
+            <div className={`mt-6 border-t pt-4 ${isLight?"border-slate-200":"border-white/10"}`}>
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className={`flex items-center gap-2 text-[14px] font-extrabold ${isLight?"text-indigo-600":"text-cyan-400"}`}><Cloud size={16} /> Cloud Sync (Optional) <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${cloudEnabled ? "bg-emerald-500/20 text-emerald-600" : "bg-slate-500/20 text-slate-500"}`}>{cloudEnabled ? "ON" : "OFF"}</span></h3>
+                <input type="checkbox" checked={cloudEnabled} onChange={e=>setCloudEnabled(e.target.checked)} className="accent-cyan-500 h-5 w-5" />
+              </div>
+              <p className={`mb-3 text-[11px] leading-relaxed ${muted}`}>Connect your own Cloudflare D1 Backend. See <b className={isLight?"text-indigo-700":"text-white"}>BACKEND.md</b> for guide. Data is encrypted locally before upload (zero-knowledge).</p>
+              
+              <div className={`space-y-3 transition-all ${cloudEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
+                <div>
+                  <label className={`mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest ${muted}`}>
+                    <span>Worker API URL</span>
+                    {workerUrl && <span className={`text-[10px] ${isValidWorkerUrl(workerUrl) ? "text-emerald-500" : "text-red-500"}`}>{isValidWorkerUrl(workerUrl) ? "✓ Valid" : "✗ Invalid URL"}</span>}
+                  </label>
+                  <input value={workerUrl} onChange={e=>setWorkerUrl(e.target.value.trim())} placeholder="https://your-worker.workers.dev" className={`w-full rounded-xl border px-3 py-2.5 text-xs outline-none transition ${isValidWorkerUrl(workerUrl) ? "border-emerald-400 focus:border-emerald-500" : workerUrl ? "border-red-300 focus:border-red-400" : "border-slate-300"} ${isLight?"bg-white text-slate-900":"bg-black/30 border-white/10 text-white"}`} />
+                  <p className={`mt-1 text-[10px] ${muted}`}>Must be https://, your Cloudflare Worker URL. Max 300 chars.</p>
+                </div>
+                <div>
+                  <label className={`mb-1 block text-[10px] font-bold uppercase tracking-widest ${muted}`}>Legacy Auth Secret (Optional — for single-user mode)</label>
+                  <input type="password" value={workerSecret} onChange={e=>setWorkerSecret(e.target.value)} placeholder="•••••••• (leave empty for multi-user JWT)" className={`w-full rounded-xl border px-3 py-2.5 text-xs outline-none ${isLight?"bg-white border-slate-300 text-slate-900":"bg-black/30 border-white/10 text-white"}`} />
+                  <p className={`mt-1 text-[10px] ${muted}`}>For new deployments, use Signup/Login instead (more secure).</p>
+                </div>
+                {syncStatus !== "idle" && (
+                  <div className={`mt-2 flex items-center gap-2 rounded-xl border p-2 text-[11px] font-bold ${syncStatus==="error" ? (isLight?"border-red-200 bg-red-50 text-red-700":"border-red-500/30 bg-red-500/10 text-red-300") : syncStatus==="done" ? (isLight?"border-emerald-200 bg-emerald-50 text-emerald-700":"border-emerald-500/30 bg-emerald-500/10 text-emerald-300") : (isLight?"border-cyan-200 bg-cyan-50 text-cyan-700":"border-cyan-500/30 bg-cyan-500/10 text-cyan-300")}`}>
+                    {syncStatus==="syncing" && <Loader2 size={12} className="animate-spin" />}
+                    {syncStatus==="syncing" ? "Syncing to Cloud…" : syncStatus==="done" ? "✓ Sync Success — Encrypted blob stored" : "❌ Sync Failed — check URL & login"}
+                  </div>
+                )}
+                <div className={`rounded-xl border p-2.5 text-[10px] leading-relaxed ${isLight?"border-amber-200 bg-amber-50 text-amber-800":"border-amber-500/20 bg-amber-500/10 text-amber-200"}`}>
+                  <ShieldAlert size={11} className="inline mr-1" /> <b>Security:</b> Even if server is hacked, data stays encrypted. Password never leaves device. See BACKEND.md threat model.
+                </div>
+              </div>
+            </div>
+
+            <button onClick={()=>{ if(confirm("Wipe all settings and local vault? This cannot be undone.")){ try{ localStorage.clear(); }catch{} location.reload() } }} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600/90 hover:bg-red-600 py-2.5 text-[13px] font-extrabold text-white transition"><Trash2 size={15} /> Factory Reset (wipe all)</button>
+            <p className={`mt-3 text-center text-[10px] tracking-widest font-bold uppercase ${muted}`}>© 2026 Surakshit Labs • Private & Secure • App works offline without backend</p>
           </div>
         </div>
       )}
